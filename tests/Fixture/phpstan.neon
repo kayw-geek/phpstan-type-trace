@@ -1,0 +1,7 @@
+parameters:
+	level: 8
+	paths:
+		- sample.php
+
+includes:
+	- ../../extension.neon

@@ -1,0 +1,19 @@
+parameters:
+	stubFiles:
+		- stubs/traceType.stub.php
+
+services:
+	-
+		class: Kayw\PhpstanTypeTrace\Collector\TraceCallCollector
+		tags: [phpstan.collector]
+	-
+		class: Kayw\PhpstanTypeTrace\Collector\VarReadCollector
+		tags: [phpstan.collector]
+	-
+		class: Kayw\PhpstanTypeTrace\Collector\AssignCollector
+		tags: [phpstan.collector]
+	-
+		class: Kayw\PhpstanTypeTrace\History\ChainBuilder
+	-
+		class: Kayw\PhpstanTypeTrace\Rule\TraceReportRule
+		tags: [phpstan.rules.rule]
