@@ -44,18 +44,30 @@ Variable name is optional — if only one variable has events at the target line
 
 Pass `--json` for machine-readable output (handy for tooling).
 
-### 2. `traceType()` — drop in a marker
+### 2. `traceType()` — drop in a marker, get the chain on your next phpstan run
+
+No extra command. Just call `traceType($var)` anywhere, then run `vendor/bin/phpstan analyse` like you always do — the chain shows up as a phpstan error at that line.
 
 ```php
 function compute(?float $discount = null): float
 {
     $discount ??= 0.1;
-    traceType($discount, 'after ??=');  // prints chain on next phpstan run
+    traceType($discount, 'after ??=');
     return 1 - $discount;
 }
 ```
 
-`traceType()` is a runtime no-op (autoloaded), so leaving it in won't break production.
+```
+ ------ -----------------------------------------------------------
+  Line   PriceCalculator.php
+ ------ -----------------------------------------------------------
+  5      Type chain for $discount in compute — after ??=
+           L3   param      float|null
+           L4   assign-op  float
+ ------ -----------------------------------------------------------
+```
+
+`traceType()` is a runtime no-op (autoloaded from `src/runtime.php`), so leaving a stray call in production code does nothing — it only emits during static analysis.
 
 ## Use it with Claude Code
 
