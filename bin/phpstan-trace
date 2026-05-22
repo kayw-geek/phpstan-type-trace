@@ -72,18 +72,23 @@ function main(array $argv): void
     $json = !empty($options['json']);
 
     if ($match === null) {
+        $reason = diagnoseMiss($chains, $absFile, $path);
         if ($json) {
             echo json_encode([
                 'found' => false,
                 'file' => $absFile,
                 'line' => $line,
                 'path' => $path,
-                'message' => 'No chain recorded for this variable up to this line. '
-                    . 'The variable may not be tracked (e.g. array-dim access) '
-                    . 'or no events occurred before line ' . $line . '.',
+                'reason' => $reason['code'],
+                'message' => $reason['message'],
+                'availablePaths' => $reason['availablePaths'],
             ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), "\n";
         } else {
             fwrite(STDERR, "No chain for {$path} at {$absFile}:{$line}\n");
+            fwrite(STDERR, "Reason: {$reason['message']}\n");
+            if ($reason['availablePaths'] !== []) {
+                fwrite(STDERR, "Variables tracked in this file: " . implode(', ', $reason['availablePaths']) . "\n");
+            }
         }
         exit($json ? 0 : 2);
     }
@@ -250,6 +255,41 @@ function runDump(string $phpstanBin, string $absFile, string $cwd): array
         }
     }
     return $chains;
+}
+
+/**
+ * @param list<array{file:string, functionKey:string, path:string, chain:list<array{line:int,origin:string,type:string}>}> $chains
+ * @return array{code:string, message:string, availablePaths:list<string>}
+ */
+function diagnoseMiss(array $chains, string $absFile, string $path): array
+{
+    if ($chains === []) {
+        return [
+            'code' => 'extension_not_loaded',
+            'message' => 'phpstan emitted zero trace events. The extension is likely not registered. '
+                . 'Ensure phpstan/extension-installer is installed, or include extension.neon manually in phpstan.neon.',
+            'availablePaths' => [],
+        ];
+    }
+
+    $sameFile = array_values(array_filter($chains, static fn (array $c): bool => $c['file'] === $absFile));
+    if ($sameFile === []) {
+        $files = array_values(array_unique(array_map(static fn (array $c): string => $c['file'], $chains)));
+        return [
+            'code' => 'file_path_mismatch',
+            'message' => 'No chains recorded for ' . $absFile . '. phpstan reported chains for other files: '
+                . implode(', ', array_slice($files, 0, 3)) . (count($files) > 3 ? ', ...' : ''),
+            'availablePaths' => [],
+        ];
+    }
+
+    $paths = array_values(array_unique(array_map(static fn (array $c): string => $c['path'], $sameFile)));
+    return [
+        'code' => 'path_not_tracked',
+        'message' => 'No events recorded for ' . $path . ' in this file. '
+            . 'The variable may be array-dim only ($x[] = ...), dynamic, or defined after the queried line.',
+        'availablePaths' => $paths,
+    ];
 }
 
 /**

@@ -23,7 +23,7 @@ final class ChainBuilder
     {
         $rank = static fn (string $o): int => match ($o) {
             'param' => 0,
-            'assign', 'assign-op', 'assign-ref' => 1,
+            'assign', 'assign-op', 'assign-ref', 'array-write' => 1,
             default => 2,
         };
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Kayw\PhpstanTypeTrace\Rule;
 
+use Kayw\PhpstanTypeTrace\Collector\ArrayWriteCollector;
 use Kayw\PhpstanTypeTrace\Collector\AssignCollector;
 use Kayw\PhpstanTypeTrace\Collector\AssignOpCollector;
 use Kayw\PhpstanTypeTrace\Collector\AssignRefCollector;
@@ -40,6 +41,7 @@ final class TraceReportRule implements Rule
         AssignCollector::class,
         AssignOpCollector::class,
         AssignRefCollector::class,
+        ArrayWriteCollector::class,
     ];
 
     /** @var list<class-string> Collectors that emit a list of events per node visit. */
