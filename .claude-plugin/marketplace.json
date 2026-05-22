@@ -1,0 +1,13 @@
+{
+    "name": "kayw-geek",
+    "owner": {
+        "name": "Kayw"
+    },
+    "plugins": [
+        {
+            "name": "phpstan-type-trace",
+            "source": "./",
+            "description": "See the full type-inference chain of any PHP value in PHPStan — every assignment, parameter binding, narrowing, and read up to the failing line."
+        }
+    ]
+}

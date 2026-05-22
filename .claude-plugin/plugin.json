@@ -1,0 +1,11 @@
+{
+    "name": "phpstan-type-trace",
+    "description": "See the full type-inference chain of any PHP value in PHPStan — every assignment, parameter binding, narrowing, and read up to the failing line. Lets Claude Code fix PHPStan errors with upstream type evidence instead of guesses.",
+    "version": "0.1.0",
+    "author": {
+        "name": "Kayw"
+    },
+    "homepage": "https://github.com/kayw-geek/phpstan-type-trace",
+    "repository": "https://github.com/kayw-geek/phpstan-type-trace",
+    "license": "MIT"
+}

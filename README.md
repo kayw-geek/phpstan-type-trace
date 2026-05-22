@@ -83,29 +83,23 @@ The CLI internally re-runs `phpstan analyse` on the target file with a dump
 env var set, parses its JSON output, and filters to the requested
 `(file, line, variable)`. Drop `--json` for a human-readable chain.
 
-### Claude Code skill
+### Claude Code plugin
 
-A ready-to-use [Claude Code](https://docs.claude.com/claude-code) skill ships
-in `skills/phpstan-trace/`. It teaches the agent **when** to call the CLI
-(on any PHPStan error involving a variable type) and **how** to interpret the
-chain.
+The repo doubles as a [Claude Code](https://docs.claude.com/claude-code)
+plugin marketplace. Install with two slash commands inside Claude Code:
 
-Install into your shell-wide skills directory:
-
-```bash
-cp -r skills/phpstan-trace ~/.claude/skills/
+```
+/plugin marketplace add kayw-geek/phpstan-type-trace
+/plugin install phpstan-type-trace@kayw-geek
 ```
 
-Or project-local:
+That's it. The skill is installed into `~/.claude/plugins/cache/` and
+auto-discovered across every project. Claude will invoke the trace
+automatically whenever it sees PHPStan errors involving types, narrowing,
+generics, or array shapes — and fix them with real upstream type evidence
+instead of guesses.
 
-```bash
-mkdir -p .claude/skills
-cp -r skills/phpstan-trace .claude/skills/
-```
-
-The agent will now invoke the trace automatically when it sees PHPStan
-errors about types, narrowing, generics, or array shapes — fixing those
-errors with the actual upstream type evidence instead of guesses.
+Updates: `/plugin marketplace update kayw-geek` then reinstall.
 
 ## Signature
 
