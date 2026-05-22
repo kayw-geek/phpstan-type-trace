@@ -14,9 +14,27 @@ declare(strict_types=1);
  * shaped this variable up to and including <line>.
  */
 
+use function Termwind\render;
+
 const SENTINEL = '__TYPETRACE_DUMP__';
 
+bootstrapAutoload();
 main($argv);
+
+function bootstrapAutoload(): void
+{
+    foreach ([
+        __DIR__ . '/../../../autoload.php',  // installed under vendor/
+        __DIR__ . '/../vendor/autoload.php', // running from source checkout
+    ] as $candidate) {
+        if (is_file($candidate)) {
+            require $candidate;
+            return;
+        }
+    }
+    fwrite(STDERR, "Could not locate composer autoload.php\n");
+    exit(1);
+}
 
 function main(array $argv): void
 {
@@ -325,42 +343,6 @@ function pickChain(array $chains, string $absFile, string $path, int $line): ?ar
 }
 
 /**
- * ANSI styling helpers. Colors disabled when NO_COLOR is set or stdout is not a TTY.
- */
-function colorsEnabled($stream): bool
-{
-    static $cache = [];
-    $id = (int) $stream;
-    if (isset($cache[$id])) {
-        return $cache[$id];
-    }
-    if (getenv('NO_COLOR') !== false) {
-        return $cache[$id] = false;
-    }
-    if (function_exists('stream_isatty')) {
-        return $cache[$id] = @stream_isatty($stream);
-    }
-    if (function_exists('posix_isatty')) {
-        return $cache[$id] = @posix_isatty($stream);
-    }
-    return $cache[$id] = false;
-}
-
-function paint($stream, string $text, string $code): string
-{
-    return colorsEnabled($stream) ? "\033[{$code}m{$text}\033[0m" : $text;
-}
-
-function originColor(string $origin): string
-{
-    return match ($origin) {
-        'param'                                                       => '32',     // green
-        'assign', 'assign-op', 'assign-ref', 'array-write'            => '33',     // yellow
-        default                                                       => '2',      // dim (read)
-    };
-}
-
-/**
  * Turn `{absFile}::{fn}` into a human label: `fn  [basename]` or `(file scope) [basename]`.
  */
 function formatFnLabel(string $functionKey, string $cwd): string
@@ -381,16 +363,20 @@ function formatFnLabel(string $functionKey, string $cwd): string
     return "{$fn}  [{$rel}]";
 }
 
+function originColor(string $origin): string
+{
+    return match ($origin) {
+        'param'                                            => 'text-green',
+        'assign', 'assign-op', 'assign-ref', 'array-write' => 'text-yellow',
+        default                                            => 'text-gray',  // read
+    };
+}
+
 /**
  * @param array{file:string, functionKey:string, path:string, chain:list<array{line:int,origin:string,type:string}>} $match
  */
 function renderChainPretty(array $match, int $line, string $cwd): void
 {
-    $stream = STDOUT;
-    $rule = colorsEnabled($stream)
-        ? str_repeat('─', 60)
-        : str_repeat('-', 60);
-
     $maxOrigin = 0;
     foreach ($match['chain'] as $e) {
         $maxOrigin = max($maxOrigin, strlen($e['origin']));
@@ -400,33 +386,47 @@ function renderChainPretty(array $match, int $line, string $cwd): void
         $maxLine = max($maxLine, strlen((string) $e['line']));
     }
 
-    $header = paint($stream, $match['path'], '1;36')
-        . '  '
-        . paint($stream, '·', '2')
-        . '  '
-        . paint($stream, formatFnLabel($match['functionKey'], $cwd), '2')
-        . '  '
-        . paint($stream, "(up to L{$line})", '2');
+    $path = htmlentities($match['path']);
+    $label = htmlentities(formatFnLabel($match['functionKey'], $cwd));
+    $upTo = "L{$line}";
 
-    echo $header, "\n";
-    echo paint($stream, $rule, '2'), "\n";
+    render(<<<HTML
+        <div class="mt-1">
+            <span class="text-cyan font-bold">{$path}</span>
+            <span class="text-gray ml-1">·</span>
+            <span class="text-gray ml-1">{$label}</span>
+            <span class="text-gray ml-1">(up to {$upTo})</span>
+        </div>
+    HTML);
+    render('<hr class="text-gray" />');
 
+    $lineWidth = $maxLine + 1; // include the leading 'L'
+    $originWidth = $maxOrigin;
     foreach ($match['chain'] as $event) {
-        $lineCell = paint($stream, 'L' . str_pad((string) $event['line'], $maxLine, ' '), '2');
-        $originCell = paint($stream, str_pad($event['origin'], $maxOrigin, ' '), originColor($event['origin']));
-        echo "  {$lineCell}  {$originCell}  {$event['type']}\n";
+        $color = originColor($event['origin']);
+        $type = htmlentities($event['type']);
+        $lineLabel = 'L' . $event['line'];
+        $origin = $event['origin'];
+        render(<<<HTML
+            <div class="pl-2">
+                <span class="text-gray w-{$lineWidth}">{$lineLabel}</span>
+                <span class="{$color} ml-2 w-{$originWidth}">{$origin}</span>
+                <span class="ml-2">{$type}</span>
+            </div>
+        HTML);
     }
 
-    echo paint($stream, $rule, '2'), "\n";
+    render('<hr class="text-gray" />');
 
     $count = count($match['chain']);
-    $final = $match['chain'][$count - 1]['type'];
-    $footer = paint(
-        $stream,
-        "{$count} " . ($count === 1 ? 'event' : 'events') . ' · final type: ',
-        '2',
-    ) . paint($stream, $final, '36');
-    echo $footer, "\n";
+    $word = $count === 1 ? 'event' : 'events';
+    $final = htmlentities($match['chain'][$count - 1]['type']);
+    render(<<<HTML
+        <div class="mb-1">
+            <span class="text-gray">{$count} {$word} · final type:</span>
+            <span class="text-cyan ml-1">{$final}</span>
+        </div>
+    HTML);
 }
 
 /**
@@ -438,15 +438,34 @@ function renderMissPretty($stream, string $path, string $absFile, int $line, arr
         ? substr($absFile, strlen($cwd) + 1)
         : $absFile;
 
-    $label = paint($stream, 'No chain', '1;31');
-    $where = paint($stream, "{$path} at {$rel}:{$line}", '36');
-    fwrite($stream, "{$label} for {$where}\n");
+    $pathHtml = htmlentities($path);
+    $whereHtml = htmlentities("{$rel}:{$line}");
+    $code = htmlentities($reason['code']);
+    $message = htmlentities($reason['message']);
 
-    $reasonLabel = paint($stream, 'Reason', '1;33');
-    fwrite($stream, "{$reasonLabel} ({$reason['code']}): {$reason['message']}\n");
+    render(<<<HTML
+        <div class="mt-1">
+            <span class="bg-red text-white px-1 font-bold">No chain</span>
+            <span class="ml-1 text-cyan">{$pathHtml}</span>
+            <span class="ml-1 text-gray">at</span>
+            <span class="ml-1 text-cyan">{$whereHtml}</span>
+        </div>
+    HTML);
+    render(<<<HTML
+        <div>
+            <span class="text-yellow font-bold">Reason</span>
+            <span class="text-gray ml-1">({$code}):</span>
+            <span class="ml-1">{$message}</span>
+        </div>
+    HTML);
 
     if ($reason['availablePaths'] !== []) {
-        $tracked = paint($stream, 'Tracked in this file', '1;32');
-        fwrite($stream, "{$tracked}: " . implode(', ', $reason['availablePaths']) . "\n");
+        $list = htmlentities(implode(', ', $reason['availablePaths']));
+        render(<<<HTML
+            <div class="mb-1">
+                <span class="text-green font-bold">Tracked in this file:</span>
+                <span class="ml-1">{$list}</span>
+            </div>
+        HTML);
     }
 }
