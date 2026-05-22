@@ -142,17 +142,17 @@ Usage:
 
 Arguments:
   <file>:<line>   Target location, e.g. src/Service.php:42
-  <var>           Variable to inspect (optional). Accepts:
-                    user            ($user)
-                    $user           ($user)         (quote it!)
-                    user->name      ($user->name)
-                    '$user->name'   ($user->name)   (quote it!)
-                    self::$count    (self::$count)  (quote it!)
+  <var>           Variable to inspect (optional). Accepts (always single-quote
+                  any form except a bare name — the shell will otherwise
+                  expand $, redirect on >, or split on ;):
+                    user             → $user
+                    '$user'          → $user
+                    'user->name'     → $user->name
+                    '$user->name'    → $user->name
+                    'self::$count'   → self::$count
+                    'Foo::$count'    → Foo::$count
                   If omitted and exactly one variable is tracked at <line>,
                   it is auto-selected. Otherwise the candidates are listed.
-
-                  Note: any form containing $, ->, ::, or ; must be wrapped
-                  in single quotes so the shell does not expand or split it.
 
 Options:
   --json          Emit machine-readable JSON (designed for agent consumption).
