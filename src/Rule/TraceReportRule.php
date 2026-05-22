@@ -8,6 +8,7 @@ use Kayw\PhpstanTypeTrace\Collector\ArrayWriteCollector;
 use Kayw\PhpstanTypeTrace\Collector\AssignCollector;
 use Kayw\PhpstanTypeTrace\Collector\AssignOpCollector;
 use Kayw\PhpstanTypeTrace\Collector\AssignRefCollector;
+use Kayw\PhpstanTypeTrace\Collector\NarrowingCollector;
 use Kayw\PhpstanTypeTrace\Collector\ParamInArrowFunctionCollector;
 use Kayw\PhpstanTypeTrace\Collector\ParamInClosureCollector;
 use Kayw\PhpstanTypeTrace\Collector\ParamInFunctionCollector;
@@ -42,6 +43,7 @@ final class TraceReportRule implements Rule
         AssignOpCollector::class,
         AssignRefCollector::class,
         ArrayWriteCollector::class,
+        NarrowingCollector::class,
     ];
 
     /** @var list<class-string> Collectors that emit a list of events per node visit. */
@@ -50,6 +52,7 @@ final class TraceReportRule implements Rule
         ParamInMethodCollector::class,
         ParamInClosureCollector::class,
         ParamInArrowFunctionCollector::class,
+        NarrowingCollector::class,
     ];
 
     public function __construct(private readonly ChainBuilder $chainBuilder) {}
@@ -81,7 +84,7 @@ final class TraceReportRule implements Rule
     }
 
     /**
-     * @return array<string, list<array{line:int,functionKey:string,path:string,type:string,origin:string}>>
+     * @return array<string, list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}>>
      */
     private function collectEventsByFile(CollectedDataNode $node): array
     {
@@ -92,7 +95,7 @@ final class TraceReportRule implements Rule
             foreach ($collected as $file => $items) {
                 foreach ($items as $item) {
                     if ($emitsLists) {
-                        /** @var list<array{line:int,functionKey:string,path:string,type:string,origin:string}> $item */
+                        /** @var list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $item */
                         foreach ($item as $event) {
                             $eventsByFile[$file][] = $event;
                         }
@@ -110,7 +113,7 @@ final class TraceReportRule implements Rule
      * Dump every chain per (file, functionKey, path) as a JSON sentinel error.
      * Consumed by the phpstan-trace CLI, not meant for human reading.
      *
-     * @param array<string, list<array{line:int,functionKey:string,path:string,type:string,origin:string}>> $eventsByFile
+     * @param array<string, list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}>> $eventsByFile
      * @return list<IdentifierRuleError>
      */
     private function dumpAllChains(array $eventsByFile): array
@@ -158,7 +161,7 @@ final class TraceReportRule implements Rule
 
     /**
      * @param array{line:int,functionKey:string,functionLabel:string,path:?string,argType:string,reason:?string} $trace
-     * @param list<array{line:int,functionKey:string,path:string,type:string,origin:string}> $fileEvents
+     * @param list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $fileEvents
      */
     private function buildError(string $file, array $trace, array $fileEvents): IdentifierRuleError
     {
@@ -172,7 +175,7 @@ final class TraceReportRule implements Rule
 
     /**
      * @param array{line:int,functionKey:string,functionLabel:string,path:?string,argType:string,reason:?string} $trace
-     * @param list<array{line:int,functionKey:string,path:string,type:string,origin:string}> $fileEvents
+     * @param list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $fileEvents
      */
     private function renderMessage(array $trace, array $fileEvents): string
     {
@@ -204,7 +207,8 @@ final class TraceReportRule implements Rule
 
         $lines = [$header];
         foreach ($chain as $entry) {
-            $lines[] = sprintf('  L%-5d %-10s %s', $entry['line'], $entry['origin'], $entry['type']);
+            $suffix = isset($entry['reason']) ? '  (' . $entry['reason'] . ')' : '';
+            $lines[] = sprintf('  L%-5d %-10s %s%s', $entry['line'], $entry['origin'], $entry['type'], $suffix);
         }
         return implode("\n", $lines);
     }

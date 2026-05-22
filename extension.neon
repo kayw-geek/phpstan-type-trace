@@ -40,6 +40,9 @@ services:
 		class: Kayw\PhpstanTypeTrace\Collector\ArrayWriteCollector
 		tags: [phpstan.collector]
 	-
+		class: Kayw\PhpstanTypeTrace\Collector\NarrowingCollector
+		tags: [phpstan.collector]
+	-
 		class: Kayw\PhpstanTypeTrace\History\ChainBuilder
 	-
 		class: Kayw\PhpstanTypeTrace\Rule\TraceReportRule

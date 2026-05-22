@@ -389,6 +389,7 @@ function originColor(string $origin): string
     return match ($origin) {
         'param'                                            => 'text-green',
         'assign', 'assign-op', 'assign-ref', 'array-write' => 'text-yellow',
+        'narrow'                                           => 'text-magenta',
         default                                            => 'text-gray',  // read
     };
 }
@@ -428,11 +429,16 @@ function renderChainPretty(array $match, int $line, string $cwd): void
         $type = htmlentities($event['type']);
         $lineLabel = 'L' . $event['line'];
         $origin = $event['origin'];
+        $reason = $event['reason'] ?? null;
+        $reasonHtml = $reason !== null
+            ? '<span class="text-gray ml-2">(' . htmlentities($reason) . ')</span>'
+            : '';
         render(<<<HTML
             <div class="pl-2">
                 <span class="text-gray w-{$lineWidth}">{$lineLabel}</span>
                 <span class="{$color} ml-2 w-{$originWidth}">{$origin}</span>
                 <span class="ml-2">{$type}</span>
+                {$reasonHtml}
             </div>
         HTML);
     }
