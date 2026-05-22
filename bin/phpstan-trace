@@ -279,6 +279,10 @@ function runDump(string $phpstanBin, string $absFile, string $cwd): array
                 'functionKey' => $payload['functionKey'],
                 'path' => $payload['path'],
                 'chain' => $payload['chain'],
+                'eventLines' => $payload['eventLines'] ?? array_values(array_unique(array_map(
+                    static fn (array $e): int => $e['line'],
+                    $payload['chain'],
+                ))),
             ];
         }
     }
@@ -488,10 +492,11 @@ function renderMissPretty($stream, string $path, string $absFile, int $line, arr
 }
 
 /**
- * Return the distinct variable paths that have at least one chain event
- * at exactly the queried line in the queried file.
+ * Return the distinct variable paths that have at least one raw event at
+ * exactly the queried line in the queried file. Uses pre-dedup `eventLines`
+ * so reads collapsed by the chain builder still count as candidates.
  *
- * @param list<array{file:string, functionKey:string, path:string, chain:list<array{line:int,origin:string,type:string}>}> $chains
+ * @param list<array{file:string, functionKey:string, path:string, chain:list<array{line:int,origin:string,type:string}>, eventLines:list<int>}> $chains
  * @return list<string>
  */
 function candidatesAtLine(array $chains, string $absFile, int $line): array
@@ -501,11 +506,8 @@ function candidatesAtLine(array $chains, string $absFile, int $line): array
         if ($candidate['file'] !== $absFile) {
             continue;
         }
-        foreach ($candidate['chain'] as $event) {
-            if ($event['line'] === $line) {
-                $paths[$candidate['path']] = true;
-                break;
-            }
+        if (in_array($line, $candidate['eventLines'], true)) {
+            $paths[$candidate['path']] = true;
         }
     }
     return array_values(array_keys($paths));

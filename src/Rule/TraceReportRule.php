@@ -128,11 +128,18 @@ final class TraceReportRule implements Rule
                 }
                 $first = $events[0];
                 $last = $chain[count($chain) - 1];
+                $eventLines = [];
+                foreach ($events as $event) {
+                    $eventLines[$event['line']] = true;
+                }
+                $eventLines = array_keys($eventLines);
+                sort($eventLines);
                 $payload = [
                     '_typetrace' => true,
                     'functionKey' => $first['functionKey'],
                     'path' => $first['path'],
                     'chain' => $chain,
+                    'eventLines' => $eventLines,
                 ];
                 $errors[] = RuleErrorBuilder::message(
                     self::DUMP_SENTINEL . json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
