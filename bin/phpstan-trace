@@ -54,13 +54,14 @@ function main(array $argv): void
 
     [$positional, $options] = parseArgs(array_slice($argv, 1));
 
-    if (count($positional) !== 2) {
-        fwrite(STDERR, "inspect requires exactly two positional arguments: <file>:<line> <var>\n\n");
+    if (count($positional) < 1 || count($positional) > 2) {
+        fwrite(STDERR, "inspect requires <file>:<line> and an optional <var>\n\n");
         usage(STDERR);
         exit(1);
     }
 
-    [$fileLine, $rawVar] = $positional;
+    $fileLine = $positional[0];
+    $rawVar = $positional[1] ?? null;
     if (!preg_match('/^(.+):(\d+)$/', $fileLine, $m)) {
         fwrite(STDERR, "Expected <file>:<line>, got: {$fileLine}\n");
         exit(1);
@@ -76,8 +77,6 @@ function main(array $argv): void
         exit(1);
     }
 
-    $path = normalizeVarPath($rawVar);
-
     $phpstanBin = $options['phpstan'] ?? findPhpstan($cwd);
     if ($phpstanBin === null) {
         fwrite(STDERR, "Could not locate phpstan binary. Pass --phpstan=<path>.\n");
@@ -85,9 +84,21 @@ function main(array $argv): void
     }
 
     $chains = runDump($phpstanBin, $absFile, $cwd);
-    $match = pickChain($chains, $absFile, $path, $line);
-
     $json = !empty($options['json']);
+
+    if ($rawVar === null) {
+        $candidates = candidatesAtLine($chains, $absFile, $line);
+        if (count($candidates) === 1) {
+            $path = $candidates[0];
+        } else {
+            renderAmbiguous($candidates, $absFile, $line, $cwd, $json);
+            exit($json ? 0 : 2);
+        }
+    } else {
+        $path = normalizeVarPath($rawVar);
+    }
+
+    $match = pickChain($chains, $absFile, $path, $line);
 
     if ($match === null) {
         $reason = diagnoseMiss($chains, $absFile, $path);
@@ -127,15 +138,21 @@ function usage($stream): void
 phpstan-trace — inspect the type-inference chain of a PHP variable.
 
 Usage:
-  phpstan-trace inspect <file>:<line> <var> [options]
+  phpstan-trace inspect <file>:<line> [<var>] [options]
 
 Arguments:
   <file>:<line>   Target location, e.g. src/Service.php:42
-  <var>           Variable to inspect. Accepts:
+  <var>           Variable to inspect (optional). Accepts:
                     user            ($user)
-                    $user           ($user)
+                    $user           ($user)         (quote it!)
                     user->name      ($user->name)
-                    self::$count    (self::$count)
+                    '$user->name'   ($user->name)   (quote it!)
+                    self::$count    (self::$count)  (quote it!)
+                  If omitted and exactly one variable is tracked at <line>,
+                  it is auto-selected. Otherwise the candidates are listed.
+
+                  Note: any form containing $, ->, ::, or ; must be wrapped
+                  in single quotes so the shell does not expand or split it.
 
 Options:
   --json          Emit machine-readable JSON (designed for agent consumption).
@@ -468,4 +485,93 @@ function renderMissPretty($stream, string $path, string $absFile, int $line, arr
             </div>
         HTML);
     }
+}
+
+/**
+ * Return the distinct variable paths that have at least one chain event
+ * at exactly the queried line in the queried file.
+ *
+ * @param list<array{file:string, functionKey:string, path:string, chain:list<array{line:int,origin:string,type:string}>}> $chains
+ * @return list<string>
+ */
+function candidatesAtLine(array $chains, string $absFile, int $line): array
+{
+    $paths = [];
+    foreach ($chains as $candidate) {
+        if ($candidate['file'] !== $absFile) {
+            continue;
+        }
+        foreach ($candidate['chain'] as $event) {
+            if ($event['line'] === $line) {
+                $paths[$candidate['path']] = true;
+                break;
+            }
+        }
+    }
+    return array_values(array_keys($paths));
+}
+
+/**
+ * Render the disambiguation output when <var> is omitted and we cannot
+ * auto-pick a single candidate (zero, or more than one).
+ *
+ * @param list<string> $candidates
+ */
+function renderAmbiguous(array $candidates, string $absFile, int $line, string $cwd, bool $json): void
+{
+    if ($json) {
+        echo json_encode([
+            'found' => false,
+            'file' => $absFile,
+            'line' => $line,
+            'reason' => $candidates === [] ? 'no_var_at_line' : 'ambiguous',
+            'message' => $candidates === []
+                ? 'No tracked variable has an event at this line.'
+                : 'Multiple variables are tracked at this line; specify <var>.',
+            'candidates' => $candidates,
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), "\n";
+        return;
+    }
+
+    $rel = str_starts_with($absFile, $cwd . DIRECTORY_SEPARATOR)
+        ? substr($absFile, strlen($cwd) + 1)
+        : $absFile;
+    $whereHtml = htmlentities("{$rel}:{$line}");
+
+    if ($candidates === []) {
+        render(<<<HTML
+            <div class="mt-1">
+                <span class="bg-red text-white px-1 font-bold">No variable</span>
+                <span class="ml-1 text-gray">at</span>
+                <span class="ml-1 text-cyan">{$whereHtml}</span>
+            </div>
+        HTML);
+        render(<<<HTML
+            <div class="mb-1">
+                <span class="text-yellow">No tracked variable has an event at this line. Pass</span>
+                <span class="text-cyan ml-1">&lt;var&gt;</span>
+                <span class="text-yellow ml-1">explicitly, or pick another line.</span>
+            </div>
+        HTML);
+        return;
+    }
+
+    render(<<<HTML
+        <div class="mt-1">
+            <span class="bg-yellow text-black px-1 font-bold">Ambiguous</span>
+            <span class="ml-1 text-gray">at</span>
+            <span class="ml-1 text-cyan">{$whereHtml}</span>
+            <span class="ml-1 text-gray">— multiple variables tracked, pick one:</span>
+        </div>
+    HTML);
+    foreach ($candidates as $cand) {
+        $candHtml = htmlentities($cand);
+        render(<<<HTML
+            <div class="pl-2">
+                <span class="text-gray">•</span>
+                <span class="text-cyan ml-1">{$candHtml}</span>
+            </div>
+        HTML);
+    }
+    render('<div class="mb-1"></div>');
 }
