@@ -100,3 +100,16 @@ the param and the call, not to change the signature of `format()`.
 - For interactive (non-agent) use, omit `--json` for a human-readable chain.
 - `traceType($value)` marker calls in source still work for ad-hoc human
   debugging — the CLI and the marker share the same collector pipeline.
+- **PHPStan result cache caveat.** PHPStan caches analysis per source file. If
+  you change the *target file* between runs, the chain updates automatically;
+  but if the chain output looks **identical to a previous run** even though you
+  expect a change (e.g. you edited a callee, a stub, a config, or upgraded the
+  extension), the cache is likely stale. Clear it once and re-run:
+
+  ```bash
+  ./vendor/bin/phpstan clear-result-cache
+  ./vendor/bin/phpstan-trace inspect <file>:<line> <var> --json
+  ```
+
+  Symptom: dump-mode emits zero `__TYPETRACE_DUMP__` errors for a file you know
+  has tracked variables → cache miss. Clear and retry before assuming a bug.
