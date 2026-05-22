@@ -1,0 +1,292 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * phpstan-trace — query the type-inference chain of a variable.
+ *
+ * Usage:
+ *   phpstan-trace inspect <file>:<line> <var> [--json] [--phpstan=<path>] [--cwd=<dir>]
+ *
+ * The variable name may include `->` and `::` chains (e.g. `user->name`).
+ * A leading `$` is optional. The CLI returns the chain of events that
+ * shaped this variable up to and including <line>.
+ */
+
+const SENTINEL = '__TYPETRACE_DUMP__';
+
+main($argv);
+
+function main(array $argv): void
+{
+    $argv = array_values(array_slice($argv, 1));
+    $cmd = $argv[0] ?? null;
+
+    if ($cmd === null || $cmd === '-h' || $cmd === '--help' || $cmd === 'help') {
+        usage(STDOUT);
+        exit($cmd === null ? 1 : 0);
+    }
+
+    if ($cmd !== 'inspect') {
+        fwrite(STDERR, "Unknown command: {$cmd}\n\n");
+        usage(STDERR);
+        exit(1);
+    }
+
+    [$positional, $options] = parseArgs(array_slice($argv, 1));
+
+    if (count($positional) !== 2) {
+        fwrite(STDERR, "inspect requires exactly two positional arguments: <file>:<line> <var>\n\n");
+        usage(STDERR);
+        exit(1);
+    }
+
+    [$fileLine, $rawVar] = $positional;
+    if (!preg_match('/^(.+):(\d+)$/', $fileLine, $m)) {
+        fwrite(STDERR, "Expected <file>:<line>, got: {$fileLine}\n");
+        exit(1);
+    }
+
+    $cwd = $options['cwd'] ?? getcwd();
+    $file = $m[1];
+    $line = (int) $m[2];
+
+    $absFile = resolveFile($file, $cwd);
+    if ($absFile === null) {
+        fwrite(STDERR, "File not found: {$file}\n");
+        exit(1);
+    }
+
+    $path = normalizeVarPath($rawVar);
+
+    $phpstanBin = $options['phpstan'] ?? findPhpstan($cwd);
+    if ($phpstanBin === null) {
+        fwrite(STDERR, "Could not locate phpstan binary. Pass --phpstan=<path>.\n");
+        exit(1);
+    }
+
+    $chains = runDump($phpstanBin, $absFile, $cwd);
+    $match = pickChain($chains, $absFile, $path, $line);
+
+    $json = !empty($options['json']);
+
+    if ($match === null) {
+        if ($json) {
+            echo json_encode([
+                'found' => false,
+                'file' => $absFile,
+                'line' => $line,
+                'path' => $path,
+                'message' => 'No chain recorded for this variable up to this line. '
+                    . 'The variable may not be tracked (e.g. array-dim access) '
+                    . 'or no events occurred before line ' . $line . '.',
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), "\n";
+        } else {
+            fwrite(STDERR, "No chain for {$path} at {$absFile}:{$line}\n");
+        }
+        exit($json ? 0 : 2);
+    }
+
+    if ($json) {
+        echo json_encode([
+            'found' => true,
+            'file' => $absFile,
+            'line' => $line,
+            'path' => $match['path'],
+            'functionKey' => $match['functionKey'],
+            'chain' => $match['chain'],
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), "\n";
+    } else {
+        echo "Type chain for {$match['path']} in {$match['functionKey']} (up to L{$line}):\n";
+        foreach ($match['chain'] as $event) {
+            printf("  L%-5d %-10s %s\n", $event['line'], $event['origin'], $event['type']);
+        }
+    }
+}
+
+function usage($stream): void
+{
+    fwrite($stream, <<<'TXT'
+phpstan-trace — inspect the type-inference chain of a PHP variable.
+
+Usage:
+  phpstan-trace inspect <file>:<line> <var> [options]
+
+Arguments:
+  <file>:<line>   Target location, e.g. src/Service.php:42
+  <var>           Variable to inspect. Accepts:
+                    user            ($user)
+                    $user           ($user)
+                    user->name      ($user->name)
+                    self::$count    (self::$count)
+
+Options:
+  --json          Emit machine-readable JSON (designed for agent consumption).
+  --phpstan=PATH  Override phpstan binary (default: ./vendor/bin/phpstan).
+  --cwd=DIR       Override working directory used to resolve paths.
+  -h, --help      Show this message.
+
+Examples:
+  phpstan-trace inspect src/User.php:42 user --json
+  phpstan-trace inspect src/User.php:55 user->profile
+
+TXT
+    );
+}
+
+/**
+ * @return array{0: list<string>, 1: array<string, string|true>}
+ */
+function parseArgs(array $args): array
+{
+    $positional = [];
+    $options = [];
+    foreach ($args as $arg) {
+        if (str_starts_with($arg, '--')) {
+            $body = substr($arg, 2);
+            if (str_contains($body, '=')) {
+                [$k, $v] = explode('=', $body, 2);
+                $options[$k] = $v;
+            } else {
+                $options[$body] = true;
+            }
+        } else {
+            $positional[] = $arg;
+        }
+    }
+    return [$positional, $options];
+}
+
+function resolveFile(string $file, string $cwd): ?string
+{
+    if ($file !== '' && $file[0] === '/' && is_file($file)) {
+        return realpath($file) ?: $file;
+    }
+    $abs = $cwd . DIRECTORY_SEPARATOR . $file;
+    if (is_file($abs)) {
+        return realpath($abs) ?: $abs;
+    }
+    return null;
+}
+
+function normalizeVarPath(string $raw): string
+{
+    if ($raw === '') {
+        return $raw;
+    }
+    // Allow leading $ to be optional for plain variables.
+    if ($raw[0] !== '$' && !str_starts_with($raw, 'self::') && !str_starts_with($raw, 'static::') && !str_contains($raw, '::')) {
+        return '$' . $raw;
+    }
+    return $raw;
+}
+
+function findPhpstan(string $cwd): ?string
+{
+    $candidates = [
+        $cwd . '/vendor/bin/phpstan',
+        $cwd . '/vendor/bin/phpstan.phar',
+    ];
+    foreach ($candidates as $c) {
+        if (is_file($c) && is_executable($c)) {
+            return $c;
+        }
+    }
+    return null;
+}
+
+/**
+ * @return list<array{file:string, functionKey:string, path:string, chain:list<array{line:int,origin:string,type:string}>}>
+ */
+function runDump(string $phpstanBin, string $absFile, string $cwd): array
+{
+    $cmd = sprintf(
+        '%s analyse --error-format=json --no-progress %s',
+        escapeshellarg($phpstanBin),
+        escapeshellarg($absFile),
+    );
+    $descriptors = [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ];
+    $env = array_merge($_ENV, getenv(), ['PHPSTAN_TYPE_TRACE_DUMP' => '1']);
+    $proc = proc_open($cmd, $descriptors, $pipes, $cwd, $env);
+    if (!is_resource($proc)) {
+        fwrite(STDERR, "Failed to spawn phpstan\n");
+        exit(1);
+    }
+    fclose($pipes[0]);
+    $stdout = stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[2]);
+    proc_close($proc);
+
+    $data = json_decode($stdout, true);
+    if (!is_array($data) || !isset($data['files'])) {
+        fwrite(STDERR, "phpstan did not return JSON. stderr:\n{$stderr}\n");
+        exit(1);
+    }
+
+    $chains = [];
+    foreach ($data['files'] as $file => $info) {
+        foreach (($info['messages'] ?? []) as $msg) {
+            $text = $msg['message'] ?? '';
+            if (!str_starts_with($text, SENTINEL)) {
+                continue;
+            }
+            $payload = json_decode(substr($text, strlen(SENTINEL)), true);
+            if (!is_array($payload) || ($payload['_typetrace'] ?? false) !== true) {
+                continue;
+            }
+            $chains[] = [
+                'file' => $file,
+                'functionKey' => $payload['functionKey'],
+                'path' => $payload['path'],
+                'chain' => $payload['chain'],
+            ];
+        }
+    }
+    return $chains;
+}
+
+/**
+ * @param list<array{file:string, functionKey:string, path:string, chain:list<array{line:int,origin:string,type:string}>}> $chains
+ * @return array{file:string, functionKey:string, path:string, chain:list<array{line:int,origin:string,type:string}>}|null
+ */
+function pickChain(array $chains, string $absFile, string $path, int $line): ?array
+{
+    $best = null;
+    foreach ($chains as $candidate) {
+        if ($candidate['file'] !== $absFile) {
+            continue;
+        }
+        if ($candidate['path'] !== $path) {
+            continue;
+        }
+        $trimmed = array_values(array_filter(
+            $candidate['chain'],
+            static fn (array $e): bool => $e['line'] <= $line,
+        ));
+        if ($trimmed === []) {
+            continue;
+        }
+        $lastLine = $trimmed[count($trimmed) - 1]['line'];
+        if ($best === null || $lastLine > $best['_lastLine']) {
+            $best = [
+                'file' => $candidate['file'],
+                'functionKey' => $candidate['functionKey'],
+                'path' => $candidate['path'],
+                'chain' => $trimmed,
+                '_lastLine' => $lastLine,
+            ];
+        }
+    }
+    if ($best === null) {
+        return null;
+    }
+    unset($best['_lastLine']);
+    return $best;
+}

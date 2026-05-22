@@ -1,9 +1,10 @@
 {
-    "name": "kayw/phpstan-type-trace",
+    "name": "kayw-geek/phpstan-type-trace",
     "description": "Visualize the full type-inference chain of a value in PHPStan analysis output.",
     "type": "phpstan-extension",
     "license": "MIT",
     "keywords": ["phpstan", "static-analysis", "debug", "types"],
+    "bin": ["bin/phpstan-trace"],
     "require": {
         "php": "^8.1",
         "phpstan/phpstan": "^2.0"

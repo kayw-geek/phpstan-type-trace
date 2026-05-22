@@ -5,18 +5,18 @@ declare(strict_types=1);
 namespace Kayw\PhpstanTypeTrace\Collector;
 
 use PhpParser\Node;
-use PhpParser\Node\Expr\Assign;
+use PhpParser\Node\Expr\AssignOp;
 use PHPStan\Analyser\Scope;
 use PHPStan\Collectors\Collector;
 use PHPStan\Type\VerbosityLevel;
 
 /**
- * Captures the post-assignment type for `$x = expr`.
+ * Compound assignments: ??=, +=, -=, *=, /=, %=, .=, **=, |=, &=, ^=, <<=, >>=.
  *
- * The result type of an Assign expression equals the new value of the LHS, so we
- * read it via $scope->getType($node) on the Assign itself.
+ * Result type of an AssignOp expression equals the new value of the LHS, so we
+ * read $scope->getType($node).
  *
- * @implements Collector<Assign, array{
+ * @implements Collector<AssignOp, array{
  *     line: int,
  *     functionKey: string,
  *     path: string,
@@ -24,11 +24,11 @@ use PHPStan\Type\VerbosityLevel;
  *     origin: string,
  * }>
  */
-final class AssignCollector implements Collector
+final class AssignOpCollector implements Collector
 {
     public function getNodeType(): string
     {
-        return Assign::class;
+        return AssignOp::class;
     }
 
     public function processNode(Node $node, Scope $scope): ?array
@@ -42,8 +42,8 @@ final class AssignCollector implements Collector
             'line' => $node->getStartLine(),
             'functionKey' => ScopeKey::of($scope),
             'path' => $path,
-            'type' => $scope->getType($node->expr)->describe(VerbosityLevel::precise()),
-            'origin' => 'assign',
+            'type' => $scope->getType($node)->describe(VerbosityLevel::precise()),
+            'origin' => 'assign-op',
         ];
     }
 }

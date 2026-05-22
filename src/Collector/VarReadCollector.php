@@ -14,7 +14,7 @@ use PHPStan\Type\VerbosityLevel;
  * @implements Collector<Variable, array{
  *     line: int,
  *     functionKey: string,
- *     varName: string,
+ *     path: string,
  *     type: string,
  *     origin: string,
  * }>
@@ -28,29 +28,27 @@ final class VarReadCollector implements Collector
 
     public function processNode(Node $node, Scope $scope): ?array
     {
-        if (!is_string($node->name)) {
+        if (!is_string($node->name) || $node->name === 'this') {
             return null;
         }
 
-        if ($node->name === 'this') {
-            return null;
-        }
-
-        // LHS of an assignment — the AssignCollector reports the post-assign type;
-        // collecting here would report the stale pre-assign type and clutter the chain.
         if ($scope->isInExpressionAssign($node)) {
             return null;
         }
 
-        // Variable not (yet) defined at this point — PHPStan reports *ERROR* which is noise.
         if ($scope->hasVariableType($node->name)->no()) {
+            return null;
+        }
+
+        $path = ExprPath::of($node);
+        if ($path === null) {
             return null;
         }
 
         return [
             'line' => $node->getStartLine(),
             'functionKey' => ScopeKey::of($scope),
-            'varName' => $node->name,
+            'path' => $path,
             'type' => $scope->getType($node)->describe(VerbosityLevel::precise()),
             'origin' => 'read',
         ];

@@ -6,11 +6,9 @@ namespace Kayw\PhpstanTypeTrace\Collector;
 
 use PhpParser\Node;
 use PhpParser\Node\Expr\FuncCall;
-use PhpParser\Node\Expr\Variable;
 use PHPStan\Analyser\Scope;
 use PHPStan\Collectors\Collector;
 use PHPStan\Reflection\ReflectionProvider;
-use PHPStan\Type\Constant\ConstantStringType;
 use PHPStan\Type\VerbosityLevel;
 
 /**
@@ -18,7 +16,7 @@ use PHPStan\Type\VerbosityLevel;
  *     line: int,
  *     functionKey: string,
  *     functionLabel: string,
- *     varName: string|null,
+ *     path: string|null,
  *     argType: string,
  *     reason: string|null,
  * }>
@@ -49,15 +47,13 @@ final class TraceCallCollector implements Collector
         }
 
         $valueExpr = $args[0]->value;
-        $varName = $valueExpr instanceof Variable && is_string($valueExpr->name)
-            ? $valueExpr->name
-            : null;
+        $path = ExprPath::of($valueExpr);
 
         $reason = null;
         if (isset($args[1])) {
-            $reasonType = $scope->getType($args[1]->value);
-            if ($reasonType instanceof ConstantStringType) {
-                $reason = $reasonType->getValue();
+            $constantStrings = $scope->getType($args[1]->value)->getConstantStrings();
+            if (count($constantStrings) === 1) {
+                $reason = $constantStrings[0]->getValue();
             }
         }
 
@@ -65,7 +61,7 @@ final class TraceCallCollector implements Collector
             'line' => $node->getStartLine(),
             'functionKey' => ScopeKey::of($scope),
             'functionLabel' => ScopeKey::label($scope),
-            'varName' => $varName,
+            'path' => $path,
             'argType' => $scope->getType($valueExpr)->describe(VerbosityLevel::precise()),
             'reason' => $reason,
         ];

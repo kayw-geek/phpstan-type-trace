@@ -7,32 +7,45 @@ namespace Kayw\PhpstanTypeTrace\History;
 final class ChainBuilder
 {
     /**
-     * Collapses consecutive same-type events into one chain entry.
+     * Sort events for display and collapse only noise.
      *
-     * Sort key: line ascending; on tie, assigns come before reads at the same
-     * line (so "$x = 5;" reads in subsequent statements show the post-assign type).
+     * Sort: line ascending; on tie, param < assign/assign-op/assign-ref < read
+     * (so the post-mutation type wins over the pre-mutation read at the same line).
+     *
+     * Dedup rule: only collapse a repeat read whose type matches the immediately
+     * preceding entry. Mutation events (param/assign/assign-op/assign-ref) always
+     * survive — the user is tracing *flow*, not just type-changes.
      *
      * @param list<array{line: int, type: string, origin: string}> $events
      * @return list<array{line: int, type: string, origin: string}>
      */
     public function build(array $events): array
     {
-        usort($events, static function (array $a, array $b): int {
+        $rank = static fn (string $o): int => match ($o) {
+            'param' => 0,
+            'assign', 'assign-op', 'assign-ref' => 1,
+            default => 2,
+        };
+
+        usort($events, static function (array $a, array $b) use ($rank): int {
             if ($a['line'] !== $b['line']) {
                 return $a['line'] <=> $b['line'];
             }
-            $rank = static fn (string $o): int => $o === 'assign' ? 0 : 1;
             return $rank($a['origin']) <=> $rank($b['origin']);
         });
 
         $chain = [];
-        $prevType = null;
+        $prev = null;
         foreach ($events as $event) {
-            if ($event['type'] === $prevType) {
+            if (
+                $event['origin'] === 'read'
+                && $prev !== null
+                && $event['type'] === $prev['type']
+            ) {
                 continue;
             }
             $chain[] = $event;
-            $prevType = $event['type'];
+            $prev = $event;
         }
         return $chain;
     }

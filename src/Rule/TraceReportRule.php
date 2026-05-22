@@ -5,6 +5,14 @@ declare(strict_types=1);
 namespace Kayw\PhpstanTypeTrace\Rule;
 
 use Kayw\PhpstanTypeTrace\Collector\AssignCollector;
+use Kayw\PhpstanTypeTrace\Collector\AssignOpCollector;
+use Kayw\PhpstanTypeTrace\Collector\AssignRefCollector;
+use Kayw\PhpstanTypeTrace\Collector\ParamInArrowFunctionCollector;
+use Kayw\PhpstanTypeTrace\Collector\ParamInClosureCollector;
+use Kayw\PhpstanTypeTrace\Collector\ParamInFunctionCollector;
+use Kayw\PhpstanTypeTrace\Collector\ParamInMethodCollector;
+use Kayw\PhpstanTypeTrace\Collector\PropertyFetchCollector;
+use Kayw\PhpstanTypeTrace\Collector\StaticPropertyFetchCollector;
 use Kayw\PhpstanTypeTrace\Collector\TraceCallCollector;
 use Kayw\PhpstanTypeTrace\Collector\VarReadCollector;
 use Kayw\PhpstanTypeTrace\History\ChainBuilder;
@@ -20,6 +28,28 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class TraceReportRule implements Rule
 {
+    /** @var list<class-string> */
+    private const EVENT_COLLECTORS = [
+        ParamInFunctionCollector::class,
+        ParamInMethodCollector::class,
+        ParamInClosureCollector::class,
+        ParamInArrowFunctionCollector::class,
+        VarReadCollector::class,
+        PropertyFetchCollector::class,
+        StaticPropertyFetchCollector::class,
+        AssignCollector::class,
+        AssignOpCollector::class,
+        AssignRefCollector::class,
+    ];
+
+    /** @var list<class-string> Collectors that emit a list of events per node visit. */
+    private const LIST_EMITTING_COLLECTORS = [
+        ParamInFunctionCollector::class,
+        ParamInMethodCollector::class,
+        ParamInClosureCollector::class,
+        ParamInArrowFunctionCollector::class,
+    ];
+
     public function __construct(private readonly ChainBuilder $chainBuilder) {}
 
     public function getNodeType(): string
@@ -29,16 +59,18 @@ final class TraceReportRule implements Rule
 
     public function processNode(Node $node, Scope $scope): array
     {
-        /** @var array<string, list<array{line:int,functionKey:string,functionLabel:string,varName:?string,argType:string,reason:?string}>> $traces */
+        $eventsByFile = $this->collectEventsByFile($node);
+
+        if (getenv('PHPSTAN_TYPE_TRACE_DUMP') === '1') {
+            return $this->dumpAllChains($eventsByFile);
+        }
+
+        /** @var array<string, list<array{line:int,functionKey:string,functionLabel:string,path:?string,argType:string,reason:?string}>> $traces */
         $traces = $node->get(TraceCallCollector::class);
-        /** @var array<string, list<array{line:int,functionKey:string,varName:string,type:string,origin:string}>> $reads */
-        $reads = $node->get(VarReadCollector::class);
-        /** @var array<string, list<array{line:int,functionKey:string,varName:string,type:string,origin:string}>> $assigns */
-        $assigns = $node->get(AssignCollector::class);
 
         $errors = [];
         foreach ($traces as $file => $fileTraces) {
-            $fileEvents = array_merge($reads[$file] ?? [], $assigns[$file] ?? []);
+            $fileEvents = $eventsByFile[$file] ?? [];
             foreach ($fileTraces as $trace) {
                 $errors[] = $this->buildError($file, $trace, $fileEvents);
             }
@@ -47,14 +79,81 @@ final class TraceReportRule implements Rule
     }
 
     /**
-     * @param array{line:int,functionKey:string,functionLabel:string,varName:?string,argType:string,reason:?string} $trace
-     * @param list<array{line:int,functionKey:string,varName:string,type:string,origin:string}> $fileEvents
+     * @return array<string, list<array{line:int,functionKey:string,path:string,type:string,origin:string}>>
+     */
+    private function collectEventsByFile(CollectedDataNode $node): array
+    {
+        $eventsByFile = [];
+        foreach (self::EVENT_COLLECTORS as $collectorClass) {
+            $collected = $node->get($collectorClass);
+            $emitsLists = in_array($collectorClass, self::LIST_EMITTING_COLLECTORS, true);
+            foreach ($collected as $file => $items) {
+                foreach ($items as $item) {
+                    if ($emitsLists) {
+                        /** @var list<array{line:int,functionKey:string,path:string,type:string,origin:string}> $item */
+                        foreach ($item as $event) {
+                            $eventsByFile[$file][] = $event;
+                        }
+                    } else {
+                        /** @var array{line:int,functionKey:string,path:string,type:string,origin:string} $item */
+                        $eventsByFile[$file][] = $item;
+                    }
+                }
+            }
+        }
+        return $eventsByFile;
+    }
+
+    /**
+     * Dump every chain per (file, functionKey, path) as a JSON sentinel error.
+     * Consumed by the phpstan-trace CLI, not meant for human reading.
+     *
+     * @param array<string, list<array{line:int,functionKey:string,path:string,type:string,origin:string}>> $eventsByFile
+     * @return list<IdentifierRuleError>
+     */
+    private function dumpAllChains(array $eventsByFile): array
+    {
+        $errors = [];
+        foreach ($eventsByFile as $file => $events) {
+            $byKey = [];
+            foreach ($events as $event) {
+                $byKey[$event['functionKey'] . "\0" . $event['path']][] = $event;
+            }
+            foreach ($byKey as $events) {
+                $chain = $this->chainBuilder->build($events);
+                if ($chain === []) {
+                    continue;
+                }
+                $first = $events[0];
+                $last = $chain[count($chain) - 1];
+                $payload = [
+                    '_typetrace' => true,
+                    'functionKey' => $first['functionKey'],
+                    'path' => $first['path'],
+                    'chain' => $chain,
+                ];
+                $errors[] = RuleErrorBuilder::message(
+                    self::DUMP_SENTINEL . json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                )
+                    ->file($file)
+                    ->line($last['line'])
+                    ->identifier('typeTrace.dump')
+                    ->nonIgnorable()
+                    ->build();
+            }
+        }
+        return $errors;
+    }
+
+    public const DUMP_SENTINEL = '__TYPETRACE_DUMP__';
+
+    /**
+     * @param array{line:int,functionKey:string,functionLabel:string,path:?string,argType:string,reason:?string} $trace
+     * @param list<array{line:int,functionKey:string,path:string,type:string,origin:string}> $fileEvents
      */
     private function buildError(string $file, array $trace, array $fileEvents): IdentifierRuleError
     {
-        $message = $this->renderMessage($trace, $fileEvents);
-
-        return RuleErrorBuilder::message($message)
+        return RuleErrorBuilder::message($this->renderMessage($trace, $fileEvents))
             ->file($file)
             ->line($trace['line'])
             ->identifier('typeTrace.chain')
@@ -63,21 +162,20 @@ final class TraceReportRule implements Rule
     }
 
     /**
-     * @param array{line:int,functionKey:string,functionLabel:string,varName:?string,argType:string,reason:?string} $trace
-     * @param list<array{line:int,functionKey:string,varName:string,type:string,origin:string}> $fileEvents
+     * @param array{line:int,functionKey:string,functionLabel:string,path:?string,argType:string,reason:?string} $trace
+     * @param list<array{line:int,functionKey:string,path:string,type:string,origin:string}> $fileEvents
      */
     private function renderMessage(array $trace, array $fileEvents): string
     {
-        $header = $trace['varName'] !== null
-            ? sprintf('Type chain for $%s in %s', $trace['varName'], $trace['functionLabel'])
-            : sprintf('Type chain (non-variable expression) in %s', $trace['functionLabel']);
+        $header = $trace['path'] !== null
+            ? sprintf('Type chain for %s in %s', $trace['path'], $trace['functionLabel'])
+            : sprintf('Type chain (non-trackable expression) in %s', $trace['functionLabel']);
 
         if ($trace['reason'] !== null) {
             $header .= ' — ' . $trace['reason'];
         }
 
-        // For non-variable expressions we can't follow assignment history; show snapshot.
-        if ($trace['varName'] === null) {
+        if ($trace['path'] === null) {
             return $header . "\n  L" . $trace['line'] . '  ' . $trace['argType'];
         }
 
@@ -85,7 +183,7 @@ final class TraceReportRule implements Rule
             $fileEvents,
             static fn (array $e): bool =>
                 $e['functionKey'] === $trace['functionKey']
-                && $e['varName'] === $trace['varName']
+                && $e['path'] === $trace['path']
                 && $e['line'] <= $trace['line']
         );
 
@@ -97,7 +195,7 @@ final class TraceReportRule implements Rule
 
         $lines = [$header];
         foreach ($chain as $entry) {
-            $lines[] = sprintf('  L%-5d %-8s %s', $entry['line'], $entry['origin'], $entry['type']);
+            $lines[] = sprintf('  L%-5d %-10s %s', $entry['line'], $entry['origin'], $entry['type']);
         }
         return implode("\n", $lines);
     }

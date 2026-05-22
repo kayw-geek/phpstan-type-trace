@@ -4,57 +4,108 @@
 
 PHPStan's built-in `\PHPStan\dumpType($x)` prints the type at one line. When
 PHPStan says *"expected `int`, got `int|null`"* and the actual assignment
-happened 200 lines earlier, that single snapshot is not enough.
+happened 200 lines earlier, that snapshot is not enough.
 
 This extension adds a `traceType()` marker that prints the **delta chain** of
-how a variable's type evolved up to the call site.
+how a value's type evolved up to the call site — param entry, every
+assignment, every compound op, every narrowing.
 
 ## Install
 
 ```bash
-composer require --dev kayw/phpstan-type-trace
+composer require --dev kayw-geek/phpstan-type-trace
 ```
 
-The extension is auto-registered if you have
+Auto-registered via
 [phpstan-extension-installer](https://github.com/phpstan/extension-installer).
-Otherwise add to your `phpstan.neon`:
+Otherwise add to `phpstan.neon`:
 
 ```neon
 includes:
-    - vendor/kayw/phpstan-type-trace/extension.neon
+    - vendor/kayw-geek/phpstan-type-trace/extension.neon
 ```
 
 ## Use
 
 ```php
-function lookup(?string $name): string
+final class PriceCalculator
 {
-    $name ??= 'guest';
-    if ($name === '') {
-        $name = $_GET['fallback'] ?? null;
+    public function compute(int $base, ?float $discount = null): float
+    {
+        $base = $base + 10;
+        $base *= 2;
+        $discount ??= 0.1;
+        traceType($discount, 'after ??=');
+        return $base * (1 - $discount);
     }
-    traceType($name, 'before strtolower');
-    return strtolower($name);
 }
 ```
 
-Run `vendor/bin/phpstan analyse` and you'll get:
+Run `vendor/bin/phpstan analyse`:
 
 ```
- ------ ------------------------------------------------------------ 
-  Line   src/Foo.php                                                 
- ------ ------------------------------------------------------------ 
-  8      Type chain for $name in App\Foo::lookup — before strtolower
-         L3     read     string|null
-         L4     assign   string|'guest'
-         L5     read     string
-         L6     assign   string|null
-         L8     read     string|null
- ------ ------------------------------------------------------------ 
+  Line   PriceCalculator.php
+ ------ -----------------------------------------------------------------
+  9      Type chain for $discount in App\PriceCalculator::compute — after ??=
+           L4     param      float|null
+           L8     assign-op  float
 ```
 
-Every type transition is on its own line — you immediately see where the
-`null` snuck back in.
+The narrowing from `float|null` to `float` is now obvious — the `??=`
+defaulted away the null.
+
+## Use from an agent (no source edits)
+
+When an LLM agent (Claude Code, Cursor, etc.) is fixing PHPStan errors, it
+doesn't have time to inject `traceType()` markers and re-run analysis. The
+`phpstan-trace` CLI gives the same chain for any variable at any line, on
+demand, without touching source:
+
+```bash
+./vendor/bin/phpstan-trace inspect src/PriceCalculator.php:9 discount --json
+```
+
+```json
+{
+  "found": true,
+  "file": "/abs/path/src/PriceCalculator.php",
+  "line": 9,
+  "path": "$discount",
+  "functionKey": "App\\PriceCalculator::compute",
+  "chain": [
+    {"line": 4, "origin": "param",     "type": "float|null"},
+    {"line": 8, "origin": "assign-op", "type": "float"}
+  ]
+}
+```
+
+The CLI internally re-runs `phpstan analyse` on the target file with a dump
+env var set, parses its JSON output, and filters to the requested
+`(file, line, variable)`. Drop `--json` for a human-readable chain.
+
+### Claude Code skill
+
+A ready-to-use [Claude Code](https://docs.claude.com/claude-code) skill ships
+in `skills/phpstan-trace/`. It teaches the agent **when** to call the CLI
+(on any PHPStan error involving a variable type) and **how** to interpret the
+chain.
+
+Install into your shell-wide skills directory:
+
+```bash
+cp -r skills/phpstan-trace ~/.claude/skills/
+```
+
+Or project-local:
+
+```bash
+mkdir -p .claude/skills
+cp -r skills/phpstan-trace .claude/skills/
+```
+
+The agent will now invoke the trace automatically when it sees PHPStan
+errors about types, narrowing, generics, or array shapes — fixing those
+errors with the actual upstream type evidence instead of guesses.
 
 ## Signature
 
@@ -62,51 +113,70 @@ Every type transition is on its own line — you immediately see where the
 function traceType(mixed $value, ?string $reason = null): void
 ```
 
-- `$value` — usually a variable. If you pass an expression (like
-  `traceType($a + $b)`), the extension prints only the snapshot type at the
-  call site.
-- `$reason` — optional label shown in the chain header. Pass a string literal;
+- `$value` — a variable, property fetch (`$this->x`), or static property
+  (`Foo::$bar`). For arbitrary expressions, only the snapshot type at the
+  call site is printed.
+- `$reason` — optional label shown in the chain header. String literal only;
   dynamic values are ignored.
 
 At runtime `traceType()` is a no-op (autoloaded from `src/runtime.php`), so
-you can safely commit a `traceType()` call temporarily without breaking the
-app — it just won't do anything until the next PHPStan run.
+a stray `traceType()` won't break production — it just does nothing until
+the next PHPStan run.
 
-## What's in scope (MVP)
+## What gets captured
 
-- Local variables in functions, methods, closures.
-- Type narrowing via `if`, `instanceof`, `=== null`, `is_*`, early returns.
-- Reassignments (`=`, `??=` — coalesce assign captured via the prior read +
-  the subsequent read).
+| Source                 | Origin label  | Example                  |
+| ---------------------- | ------------- | ------------------------ |
+| Function/method params | `param`       | `function f(int $x)`     |
+| Closure / arrow-fn params | `param`    | `fn(int $x) => ...`      |
+| Variable assignment    | `assign`      | `$x = 5;`                |
+| Compound assignment    | `assign-op`   | `$x += 1; $x ??= 'def';` |
+| Reference assignment   | `assign-ref`  | `$x = &$other;`          |
+| Property fetch         | `read`        | `$this->foo`             |
+| Static property fetch  | `read`        | `Foo::$bar`              |
+| Variable read          | `read`        | bare `$x` usage          |
+
+Property and static-property mutations are captured by the same
+`assign` / `assign-op` collectors — `$obj->prop = 'x'` and `Foo::$bar += 1`
+both appear in the chain.
+
+Narrowing via `if`, `instanceof`, `=== null`, `is_*`, early-returns is free —
+PHPStan's `Scope` is already narrowed by the time collectors run, so reads
+reflect whatever narrowing was in effect.
 
 ## Known limitations
 
-- `$this->foo` and other property/static-property traces are **not** yet
-  supported. Roadmap: dedicated `PropertyFetchCollector`.
 - Loops report the post-fixpoint type, not per-iteration deltas.
-- Multiple closures inside the same enclosing function share one bucket and
-  may collide in the chain; disambiguation by closure source line is on the
-  roadmap.
+- Multiple closures inside the same enclosing function share one
+  `functionKey` bucket. Currently this *happens to* render correctly because
+  outer-scope captures join cleanly, but two same-named vars across sibling
+  closures may collide. Closure-line disambiguation is on the roadmap.
 - `traceType()` cannot follow values across function boundaries — it only
   sees the function where the call lives.
+- Ref-aliases (`$alias = &$x; $alias[] = 'y';`) show only the snapshot at
+  the call; the mutation through the alias isn't traced back to `$x`.
 
 ## How it works
 
 Two-phase PHPStan pipeline:
 
-1. **Collectors** (`TraceCallCollector`, `VarReadCollector`,
-   `AssignCollector`) record every variable read, every assignment, and every
-   `traceType()` call site as PHPStan walks the AST.
+1. **Collectors** (one per event kind) record every relevant AST event with
+   `(file, functionKey, path, line, type, origin)`:
+   - Param entry: `ParamInFunctionCollector`, `ParamInMethodCollector`,
+     `ParamInClosureCollector`, `ParamInArrowFunctionCollector` — hooked on
+     PHPStan's `In*Node` virtual nodes so scope is already inside the
+     function when params are read.
+   - Reads: `VarReadCollector`, `PropertyFetchCollector`,
+     `StaticPropertyFetchCollector`.
+   - Writes: `AssignCollector`, `AssignOpCollector` (covers all 13
+     compound-op subclasses via `AssignOp` base + PHPStan registry's
+     `class_parents` dispatch), `AssignRefCollector`.
+   - Call sites: `TraceCallCollector`.
 2. **`TraceReportRule`** runs once at the end on the virtual
    `CollectedDataNode`. For each `traceType()` call it joins the recorded
-   events on `(file, function-scope, variable-name)` filtered to lines `<=`
-   the call line, sorts by line, collapses adjacent same-type entries, and
-   emits the delta chain as a PHPStan error.
-
-Branching (`if`/`else`) and narrowing fall out for free: when
-`NodeScopeResolver` enters the true branch, the `Scope` it passes to
-collectors is already narrowed, so the recorded type at each read reflects
-whatever narrowing was in effect.
+   events on `(functionKey, path)` filtered to lines `<=` the call line,
+   sorts by line (mutations win on ties), collapses *only* boring repeated
+   reads of the same type, and emits the delta chain as a PHPStan error.
 
 ## License
 

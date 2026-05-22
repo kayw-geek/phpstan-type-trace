@@ -5,18 +5,15 @@ declare(strict_types=1);
 namespace Kayw\PhpstanTypeTrace\Collector;
 
 use PhpParser\Node;
-use PhpParser\Node\Expr\Assign;
+use PhpParser\Node\Expr\AssignRef;
 use PHPStan\Analyser\Scope;
 use PHPStan\Collectors\Collector;
 use PHPStan\Type\VerbosityLevel;
 
 /**
- * Captures the post-assignment type for `$x = expr`.
+ * Capture `$x = &$y` reference assignments.
  *
- * The result type of an Assign expression equals the new value of the LHS, so we
- * read it via $scope->getType($node) on the Assign itself.
- *
- * @implements Collector<Assign, array{
+ * @implements Collector<AssignRef, array{
  *     line: int,
  *     functionKey: string,
  *     path: string,
@@ -24,11 +21,11 @@ use PHPStan\Type\VerbosityLevel;
  *     origin: string,
  * }>
  */
-final class AssignCollector implements Collector
+final class AssignRefCollector implements Collector
 {
     public function getNodeType(): string
     {
-        return Assign::class;
+        return AssignRef::class;
     }
 
     public function processNode(Node $node, Scope $scope): ?array
@@ -43,7 +40,7 @@ final class AssignCollector implements Collector
             'functionKey' => ScopeKey::of($scope),
             'path' => $path,
             'type' => $scope->getType($node->expr)->describe(VerbosityLevel::precise()),
-            'origin' => 'assign',
+            'origin' => 'assign-ref',
         ];
     }
 }

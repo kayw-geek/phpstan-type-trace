@@ -27,12 +27,7 @@ final class ScopeKey
 
     private static function classNameOrNull(Scope $scope): ?string
     {
-        if (method_exists($scope, 'getClassReflection')) {
-            $class = $scope->getClassReflection();
-            if ($class !== null && method_exists($class, 'getName')) {
-                return $class->getName();
-            }
-        }
-        return null;
+        $class = $scope->getClassReflection();
+        return $class?->getName();
     }
 }
