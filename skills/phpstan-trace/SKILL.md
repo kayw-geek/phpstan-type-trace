@@ -51,10 +51,20 @@ you can see *where* the wrong type came in, instead of guessing.
    fields may also appear:
    - `reason` — on `narrow` events, the predicate that justified the narrowing
      (`is_string($x)`, `$x !== null`, `$x instanceof Foo`, ...).
-   - `via` — on `assign` / `assign-op` events whose RHS is a call, a list of
-     third-party PHPStan dynamic-return-type extensions that shaped the
-     inferred type (e.g. `["NewModelQueryDynamicMethodReturnTypeExtension"]`).
-     Only third-party extensions are listed.
+   - `via` — third-party PHPStan extensions that shaped the type at this
+     event. Attached to:
+       - `assign` / `assign-op` when the RHS is a call resolved by a
+         dynamic-return-type extension (e.g.
+         `["NewModelQueryDynamicMethodReturnTypeExtension"]`).
+       - `narrow` when an `if` / ternary condition contains a call resolved by
+         a type-specifying extension (e.g.
+         `["AssertTypeSpecifyingExtension"]` for webmozart Assert).
+       - `read` when a magic / virtual property is owned by a properties
+         class-reflection extension (e.g. larastan's model attribute
+         extensions).
+     Built-ins shipped by `phpstan/phpstan` core are filtered out; official
+     add-on packages (e.g. `phpstan/phpstan-webmozart-assert`) are listed even
+     though they live under the `PHPStan\` namespace.
 
 4. Use the chain to decide the fix:
    - If the wrong type entered as a **`param`**: fix the caller, or add a type
@@ -66,9 +76,13 @@ you can see *where* the wrong type came in, instead of guessing.
    - For generics/array-shape mismatches: the chain shows the exact concrete
      shape PHPStan inferred — match the consumer signature to it (or fix the
      shape).
-   - If an **`assign` carries `via`** and the inferred type looks wrong or
+   - If any event carries **`via`** and the inferred type looks wrong or
      surprising: the cited extension is the source. Read that extension's
      source (or its docs) before assuming a PHPStan bug or rewriting the call.
+     On a `narrow` event, `via` together with the `reason` (the call signature)
+     tells you exactly which specifier produced the post-guard type; on a
+     `read` event, `via` names the properties-reflection extension that owns
+     the magic / virtual attribute.
 
 ## Example
 

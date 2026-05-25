@@ -108,13 +108,19 @@ function traceType(mixed $value, ?string $reason = null): void
 
 ### Extension attribution (`via`)
 
-When an `assign` / `assign-op` RHS is a method, static-method, or function call whose return type was shaped by a third-party PHPStan dynamic-return-type extension (e.g. larastan's Eloquent builders), the responsible extension is appended:
+When a third-party PHPStan extension shaped the type at an event, the responsible extension is appended as `via …`. Three extension categories are attributed today:
 
-```
-L9   assign     Builder<User>  via NewModelQueryDynamicMethodReturnTypeExtension
-```
+| Extension category                       | Event   | Example chain row                                                                                |
+| ---------------------------------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| Dynamic return type (method / static / function) | `assign` / `assign-op` | `L9   assign  Builder<User>  via NewModelQueryDynamicMethodReturnTypeExtension`                  |
+| Type-specifying (method / static / function), inside an `if` / ternary condition | `narrow` | `L12  narrow  Webmozart\Assert\Assert::notNull($x)  =>  string  via AssertTypeSpecifyingExtension` |
+| Properties class reflection (magic / virtual attrs) | `read`  | `L23  read    string  via MagicPropsExt`                                                          |
 
-Only third-party extensions are reported — PHPStan's built-ins are filtered out. When the inferred type surprises you, `via` tells you which extension to blame (or thank) without grepping the vendor tree.
+Third-party detection is by source-file location, not namespace — official add-ons (e.g. `phpstan/phpstan-webmozart-assert`) that ship under the `PHPStan\` namespace are still attributed; only classes shipped by `phpstan/phpstan` core (or its phar) are filtered out.
+
+When the inferred type surprises you, `via` tells you which extension to blame (or thank) without grepping the vendor tree.
+
+**Not attributed yet:** type-specifying calls used as bare statements (e.g. `Assert::notNull($x);` outside any `if` / ternary). PHPStan still narrows the scope but no `narrow` event is emitted, so the chain shows `read` without an explanation. Wrap the call in an `if` if you need the attribution.
 
 ## Limitations
 
