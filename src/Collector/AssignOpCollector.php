@@ -8,8 +8,6 @@ use PhpParser\Node;
 use PhpParser\Node\Expr\AssignOp;
 use PHPStan\Analyser\Scope;
 use PHPStan\Collectors\Collector;
-use PHPStan\DependencyInjection\Type\DynamicReturnTypeExtensionRegistryProvider;
-use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\VerbosityLevel;
 
 /**
@@ -34,8 +32,7 @@ use PHPStan\Type\VerbosityLevel;
 final class AssignOpCollector implements Collector
 {
     public function __construct(
-        private readonly DynamicReturnTypeExtensionRegistryProvider $registryProvider,
-        private readonly ReflectionProvider $reflectionProvider,
+        private readonly ExtensionAttribution $extensionAttribution,
     ) {}
 
     public function getNodeType(): string
@@ -59,7 +56,7 @@ final class AssignOpCollector implements Collector
             'origin' => 'assign-op',
         ];
 
-        $via = ExtensionAttribution::ofExpr($node->expr, $scope, $this->registryProvider, $this->reflectionProvider);
+        $via = $this->extensionAttribution->ofExpr($node->expr, $scope);
         if ($via !== []) {
             $event['via'] = $via;
         }

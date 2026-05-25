@@ -27,10 +27,15 @@ use PHPStan\Type\VerbosityLevel;
  *     type: string,
  *     origin: string,
  *     reason: string,
+ *     via?: list<string>,
  * }>>
  */
 final class TernaryNarrowingCollector implements Collector
 {
+    public function __construct(
+        private readonly ExtensionAttribution $extensionAttribution,
+    ) {}
+
     public function getNodeType(): string
     {
         return Ternary::class;
@@ -60,6 +65,24 @@ final class TernaryNarrowingCollector implements Collector
                 'origin' => 'narrow',
                 'reason' => NarrowGuardScanner::predicate($path, $reason),
             ];
+        }
+        foreach (NarrowGuardScanner::callsIn($node->cond) as $call) {
+            $via = $this->extensionAttribution->ofTypeSpecifyingCall($call, $scope);
+            if ($via === []) {
+                continue;
+            }
+            foreach (SpecifierNarrow::narrowedArgs($call, $scope, $narrowedScope) as [$path, $type]) {
+                $events[] = [
+                    'line' => $branchLine,
+                    'pos' => $branchPos,
+                    'functionKey' => ScopeKey::of($scope),
+                    'path' => $path,
+                    'type' => $type,
+                    'origin' => 'narrow',
+                    'reason' => SpecifierNarrow::reason($call, $path),
+                    'via' => $via,
+                ];
+            }
         }
         return $events === [] ? null : $events;
     }

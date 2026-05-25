@@ -10,6 +10,8 @@ use PhpParser\Node\Expr\BinaryOp;
 use PhpParser\Node\Expr\ConstFetch;
 use PhpParser\Node\Expr\FuncCall;
 use PhpParser\Node\Expr\Instanceof_;
+use PhpParser\Node\Expr\MethodCall;
+use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Name;
 
 /**
@@ -79,6 +81,42 @@ final class NarrowGuardScanner
             return substr($reason, 0, -2) . '(' . $path . ')';
         }
         return $path . ' ' . $reason;
+    }
+
+    /**
+     * Walk a condition expression and yield every method/static/function call
+     * that is *not* already covered by {@see scan} (built-in `is_*` predicates).
+     * Used to surface third-party type-specifying extensions like webmozart
+     * Assert, beberlei Assert, larastan auth checks, etc.
+     *
+     * @return iterable<FuncCall|MethodCall|StaticCall>
+     */
+    public static function callsIn(Expr $cond): iterable
+    {
+        if (
+            $cond instanceof BinaryOp\BooleanAnd
+            || $cond instanceof BinaryOp\BooleanOr
+            || $cond instanceof BinaryOp\LogicalAnd
+            || $cond instanceof BinaryOp\LogicalOr
+        ) {
+            yield from self::callsIn($cond->left);
+            yield from self::callsIn($cond->right);
+            return;
+        }
+
+        if (
+            $cond instanceof FuncCall
+            && $cond->name instanceof Name
+            && in_array($cond->name->toLowerString(), self::TYPE_PREDICATES, true)
+            && isset($cond->args[0])
+            && $cond->args[0] instanceof Arg
+        ) {
+            return;
+        }
+
+        if ($cond instanceof FuncCall || $cond instanceof MethodCall || $cond instanceof StaticCall) {
+            yield $cond;
+        }
     }
 
     private static function isNullConst(Expr $expr): bool

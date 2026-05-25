@@ -16,6 +16,11 @@ use PHPStan\Type\VerbosityLevel;
  * *where* a narrowing was justified, not just *that* the subsequent read had
  * a smaller type than the prior assign.
  *
+ * Built-in guards (`is_*`, `instanceof`, `=== null`) are handled by
+ * {@see NarrowGuardScanner::scan}. Third-party type-specifying extensions
+ * (webmozart Assert, beberlei Assert, larastan auth checks, …) are handled
+ * via {@see ExtensionAttribution::ofTypeSpecifyingCall} and tagged with `via`.
+ *
  * @implements Collector<If_, list<array{
  *     line: int,
  *     pos: int,
@@ -24,10 +29,15 @@ use PHPStan\Type\VerbosityLevel;
  *     type: string,
  *     origin: string,
  *     reason: string,
+ *     via?: list<string>,
  * }>>
  */
 final class NarrowingCollector implements Collector
 {
+    public function __construct(
+        private readonly ExtensionAttribution $extensionAttribution,
+    ) {}
+
     public function getNodeType(): string
     {
         return If_::class;
@@ -56,6 +66,24 @@ final class NarrowingCollector implements Collector
                 'origin' => 'narrow',
                 'reason' => NarrowGuardScanner::predicate($path, $reason),
             ];
+        }
+        foreach (NarrowGuardScanner::callsIn($node->cond) as $call) {
+            $via = $this->extensionAttribution->ofTypeSpecifyingCall($call, $scope);
+            if ($via === []) {
+                continue;
+            }
+            foreach (SpecifierNarrow::narrowedArgs($call, $scope, $narrowedScope) as [$path, $type]) {
+                $events[] = [
+                    'line' => $bodyLine,
+                    'pos' => $bodyPos,
+                    'functionKey' => ScopeKey::of($scope),
+                    'path' => $path,
+                    'type' => $type,
+                    'origin' => 'narrow',
+                    'reason' => SpecifierNarrow::reason($call, $path),
+                    'via' => $via,
+                ];
+            }
         }
         return $events === [] ? null : $events;
     }

@@ -210,15 +210,16 @@ final class TraceReportRule implements Rule
 
         $lines = [$header];
         foreach ($chain as $entry) {
+            $viaSuffix = '';
+            if (isset($entry['via']) && $entry['via'] !== []) {
+                $viaSuffix = '  via ' . implode(', ', $entry['via']);
+            }
             if ($entry['origin'] === 'narrow' && isset($entry['reason'])) {
-                $lines[] = sprintf('  L%-5d %-10s %s  =>  %s', $entry['line'], 'narrow', $entry['reason'], $entry['type']);
+                $lines[] = sprintf('  L%-5d %-10s %s  =>  %s%s', $entry['line'], 'narrow', $entry['reason'], $entry['type'], $viaSuffix);
                 continue;
             }
             $suffix = isset($entry['reason']) ? '  (' . $entry['reason'] . ')' : '';
-            if (isset($entry['via']) && $entry['via'] !== []) {
-                $suffix .= '  via ' . implode(', ', $entry['via']);
-            }
-            $lines[] = sprintf('  L%-5d %-10s %s%s', $entry['line'], $entry['origin'], $entry['type'], $suffix);
+            $lines[] = sprintf('  L%-5d %-10s %s%s%s', $entry['line'], $entry['origin'], $entry['type'], $suffix, $viaSuffix);
         }
         return implode("\n", $lines);
     }

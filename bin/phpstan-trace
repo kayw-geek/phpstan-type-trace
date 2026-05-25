@@ -430,6 +430,10 @@ function renderChainPretty(array $match, int $line, string $cwd): void
         $lineLabel = 'L' . $event['line'];
         $origin = $event['origin'];
         $reason = $event['reason'] ?? null;
+        $via = $event['via'] ?? [];
+        $viaHtml = $via !== []
+            ? '<span class="text-blue ml-2">via ' . htmlentities(implode(', ', $via)) . '</span>'
+            : '';
         if ($origin === 'narrow' && $reason !== null) {
             $predicate = htmlentities($reason);
             render(<<<HTML
@@ -439,16 +443,13 @@ function renderChainPretty(array $match, int $line, string $cwd): void
                     <span class="ml-2">{$predicate}</span>
                     <span class="text-gray ml-2">=&gt;</span>
                     <span class="ml-2">{$type}</span>
+                    {$viaHtml}
                 </div>
             HTML);
             continue;
         }
         $reasonHtml = $reason !== null
             ? '<span class="text-gray ml-2">(' . htmlentities($reason) . ')</span>'
-            : '';
-        $via = $event['via'] ?? [];
-        $viaHtml = $via !== []
-            ? '<span class="text-blue ml-2">via ' . htmlentities(implode(', ', $via)) . '</span>'
             : '';
         render(<<<HTML
             <div class="pl-2">
