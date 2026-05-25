@@ -15,6 +15,7 @@ use PHPStan\Type\VerbosityLevel;
  *
  * @implements Collector<PropertyFetch, array{
  *     line: int,
+ *     pos: int,
  *     functionKey: string,
  *     path: string,
  *     type: string,
@@ -41,6 +42,7 @@ final class PropertyFetchCollector implements Collector
 
         return [
             'line' => $node->getStartLine(),
+            'pos' => $node->getStartFilePos(),
             'functionKey' => ScopeKey::of($scope),
             'path' => $path,
             'type' => $scope->getType($node)->describe(VerbosityLevel::precise()),

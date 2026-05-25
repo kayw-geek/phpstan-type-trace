@@ -18,6 +18,7 @@ use PHPStan\Type\VerbosityLevel;
  *
  * @implements Collector<Assign, array{
  *     line: int,
+ *     pos: int,
  *     functionKey: string,
  *     path: string,
  *     type: string,
@@ -40,6 +41,7 @@ final class AssignCollector implements Collector
 
         return [
             'line' => $node->getStartLine(),
+            'pos' => $node->getStartFilePos(),
             'functionKey' => ScopeKey::of($scope),
             'path' => $path,
             'type' => $scope->getType($node->expr)->describe(VerbosityLevel::precise()),

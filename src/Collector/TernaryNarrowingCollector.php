@@ -21,6 +21,7 @@ use PHPStan\Type\VerbosityLevel;
  *
  * @implements Collector<Ternary, list<array{
  *     line: int,
+ *     pos: int,
  *     functionKey: string,
  *     path: string,
  *     type: string,
@@ -42,6 +43,7 @@ final class TernaryNarrowingCollector implements Collector
         }
 
         $branchLine = $node->if->getStartLine();
+        $branchPos = $node->if->getStartFilePos();
         $narrowedScope = $scope->filterByTruthyValue($node->cond);
         $events = [];
         foreach (NarrowGuardScanner::scan($node->cond) as [$expr, $reason]) {
@@ -51,6 +53,7 @@ final class TernaryNarrowingCollector implements Collector
             }
             $events[] = [
                 'line' => $branchLine,
+                'pos' => $branchPos,
                 'functionKey' => ScopeKey::of($scope),
                 'path' => $path,
                 'type' => $narrowedScope->getType($expr)->describe(VerbosityLevel::precise()),

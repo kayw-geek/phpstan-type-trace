@@ -18,7 +18,7 @@ use PHPStan\Type\VerbosityLevel;
  * file/class scope — the function hasn't been entered yet, so params have
  * type `mixed` and functionKey resolves to "__top__".
  *
- * @phpstan-type ParamEvent array{line:int, functionKey:string, path:string, type:string, origin:string}
+ * @phpstan-type ParamEvent array{line:int, pos:int, functionKey:string, path:string, type:string, origin:string}
  */
 abstract class AbstractParamCollector
 {
@@ -51,6 +51,7 @@ abstract class AbstractParamCollector
         }
         return [
             'line' => $param->getStartLine(),
+            'pos' => $param->getStartFilePos(),
             'functionKey' => ScopeKey::of($scope),
             'path' => '$' . $name,
             'type' => $scope->getVariableType($name)->describe(VerbosityLevel::precise()),

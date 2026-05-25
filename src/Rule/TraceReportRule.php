@@ -87,7 +87,7 @@ final class TraceReportRule implements Rule
     }
 
     /**
-     * @return array<string, list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}>>
+     * @return array<string, list<array{line:int,pos?:int,functionKey:string,path:string,type:string,origin:string,reason?:string}>>
      */
     private function collectEventsByFile(CollectedDataNode $node): array
     {
@@ -98,12 +98,12 @@ final class TraceReportRule implements Rule
             foreach ($collected as $file => $items) {
                 foreach ($items as $item) {
                     if ($emitsLists) {
-                        /** @var list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $item */
+                        /** @var list<array{line:int,pos?:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $item */
                         foreach ($item as $event) {
                             $eventsByFile[$file][] = $event;
                         }
                     } else {
-                        /** @var array{line:int,functionKey:string,path:string,type:string,origin:string} $item */
+                        /** @var array{line:int,pos?:int,functionKey:string,path:string,type:string,origin:string} $item */
                         $eventsByFile[$file][] = $item;
                     }
                 }
@@ -116,7 +116,7 @@ final class TraceReportRule implements Rule
      * Dump every chain per (file, functionKey, path) as a JSON sentinel error.
      * Consumed by the phpstan-trace CLI, not meant for human reading.
      *
-     * @param array<string, list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}>> $eventsByFile
+     * @param array<string, list<array{line:int,pos?:int,functionKey:string,path:string,type:string,origin:string,reason?:string}>> $eventsByFile
      * @return list<IdentifierRuleError>
      */
     private function dumpAllChains(array $eventsByFile): array
@@ -164,7 +164,7 @@ final class TraceReportRule implements Rule
 
     /**
      * @param array{line:int,functionKey:string,functionLabel:string,path:?string,argType:string,reason:?string} $trace
-     * @param list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $fileEvents
+     * @param list<array{line:int,pos?:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $fileEvents
      */
     private function buildError(string $file, array $trace, array $fileEvents): IdentifierRuleError
     {
@@ -178,7 +178,7 @@ final class TraceReportRule implements Rule
 
     /**
      * @param array{line:int,functionKey:string,functionLabel:string,path:?string,argType:string,reason:?string} $trace
-     * @param list<array{line:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $fileEvents
+     * @param list<array{line:int,pos?:int,functionKey:string,path:string,type:string,origin:string,reason?:string}> $fileEvents
      */
     private function renderMessage(array $trace, array $fileEvents): string
     {

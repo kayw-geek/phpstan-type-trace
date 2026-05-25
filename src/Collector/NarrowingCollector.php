@@ -18,6 +18,7 @@ use PHPStan\Type\VerbosityLevel;
  *
  * @implements Collector<If_, list<array{
  *     line: int,
+ *     pos: int,
  *     functionKey: string,
  *     path: string,
  *     type: string,
@@ -38,6 +39,7 @@ final class NarrowingCollector implements Collector
         // first body statement. Anchoring it to the `if` line collides with
         // the read of the same variable in the condition expression itself.
         $bodyLine = isset($node->stmts[0]) ? $node->stmts[0]->getStartLine() : $node->getStartLine();
+        $bodyPos = isset($node->stmts[0]) ? $node->stmts[0]->getStartFilePos() : $node->getStartFilePos();
         $narrowedScope = $scope->filterByTruthyValue($node->cond);
         $events = [];
         foreach (NarrowGuardScanner::scan($node->cond) as [$expr, $reason]) {
@@ -47,6 +49,7 @@ final class NarrowingCollector implements Collector
             }
             $events[] = [
                 'line' => $bodyLine,
+                'pos' => $bodyPos,
                 'functionKey' => ScopeKey::of($scope),
                 'path' => $path,
                 'type' => $narrowedScope->getType($expr)->describe(VerbosityLevel::precise()),

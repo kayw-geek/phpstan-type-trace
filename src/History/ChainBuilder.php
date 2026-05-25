@@ -9,11 +9,13 @@ final class ChainBuilder
     /**
      * Sort events for display and collapse only noise.
      *
-     * Sort: line ascending; on tie, param < narrow < read < assign/assign-op/assign-ref/array-write.
-     * Narrow events are anchored to the if-body's first line and represent what's
-     * true on entry to that body. Within a statement like `$x = $x->foo()`, the
-     * RHS is evaluated (read) before the LHS commits (assign), so reads precede
-     * mutations at the same line — the chain reads as cause → effect.
+     * Sort: line ascending, then source file position ascending, then rank
+     * (param < narrow < read < assign/assign-op/assign-ref/array-write). The
+     * position tiebreak is what makes inline ternaries readable: the cond
+     * read of `$x` precedes the narrow event (anchored at the if-branch's
+     * file pos), which precedes the then-branch read of `$x`. Without it,
+     * rank alone would put narrow first and a `string|false` read would
+     * appear *after* a narrow that just claimed `string` — confusing.
      *
      * Dedup rule: collapse a repeat read whose type matches the immediately
      * preceding entry, EXCEPT when the previous entry is a narrow — narrow is
@@ -22,8 +24,8 @@ final class ChainBuilder
      * param, and narrow events always survive — the user is tracing *flow*,
      * not just type-changes.
      *
-     * @param list<array{line: int, type: string, origin: string, reason?: string}> $events
-     * @return list<array{line: int, type: string, origin: string, reason?: string}>
+     * @param list<array{line: int, pos?: int, type: string, origin: string, reason?: string}> $events
+     * @return list<array{line: int, pos?: int, type: string, origin: string, reason?: string}>
      */
     public function build(array $events): array
     {
@@ -37,6 +39,11 @@ final class ChainBuilder
         usort($events, static function (array $a, array $b) use ($rank): int {
             if ($a['line'] !== $b['line']) {
                 return $a['line'] <=> $b['line'];
+            }
+            $posA = $a['pos'] ?? PHP_INT_MAX;
+            $posB = $b['pos'] ?? PHP_INT_MAX;
+            if ($posA !== $posB) {
+                return $posA <=> $posB;
             }
             return $rank($a['origin']) <=> $rank($b['origin']);
         });
