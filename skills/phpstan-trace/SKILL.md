@@ -54,7 +54,7 @@ you can see *where* the wrong type came in, instead of guessing.
    - `via` — on `assign` / `assign-op` events whose RHS is a call, a list of
      third-party PHPStan dynamic-return-type extensions that shaped the
      inferred type (e.g. `["NewModelQueryDynamicMethodReturnTypeExtension"]`).
-     PHPStan's built-in extensions are filtered out.
+     Only third-party extensions are listed.
 
 4. Use the chain to decide the fix:
    - If the wrong type entered as a **`param`**: fix the caller, or add a type

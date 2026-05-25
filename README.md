@@ -114,7 +114,7 @@ When an `assign` / `assign-op` RHS is a method, static-method, or function call 
 L9   assign     Builder<User>  via NewModelQueryDynamicMethodReturnTypeExtension
 ```
 
-PHPStan's built-in extensions (anything under the `PHPStan\` namespace) are filtered out — they fire on every `array_map` / `Collection::map` and would drown the signal. When the inferred type surprises you, `via` tells you which extension to blame (or thank) without grepping the vendor tree.
+Only third-party extensions are reported — PHPStan's built-ins are filtered out. When the inferred type surprises you, `via` tells you which extension to blame (or thank) without grepping the vendor tree.
 
 ## Limitations
 

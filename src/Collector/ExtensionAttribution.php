@@ -22,9 +22,8 @@ use Throwable;
  * recursive scope work and potential side effects.
  *
  * Returns short class basenames (e.g. `BuilderModelFinderExtension`) rather
- * than FQCNs to keep the trace compact. PHPStan's own internal extensions
- * (those in the `PHPStan\` namespace) are filtered out — they fire on every
- * `array_map` / `Collection::map` and would drown the signal.
+ * than FQCNs to keep the trace compact. Only third-party extensions are
+ * reported; PHPStan's own internal extensions are filtered out.
  */
 final class ExtensionAttribution
 {
@@ -151,8 +150,7 @@ final class ExtensionAttribution
     }
 
     /**
-     * Drop PHPStan's built-in extensions — they fire on every `array_map` /
-     * `Collection::map` and bury the third-party signal the user cares about.
+     * Keep only third-party extensions — PHPStan's built-ins are filtered out.
      */
     private static function isThirdParty(string $fqcn): bool
     {
