@@ -9,14 +9,18 @@ final class ChainBuilder
     /**
      * Sort events for display and collapse only noise.
      *
-     * Sort: line ascending; on tie, param < assign/assign-op/assign-ref/array-write
-     * < narrow < read. Mutations win over the pre-mutation read at the same line;
-     * a narrow guard slots between mutations and reads so the chain reads as
-     * cause → effect.
+     * Sort: line ascending; on tie, param < narrow < read < assign/assign-op/assign-ref/array-write.
+     * Narrow events are anchored to the if-body's first line and represent what's
+     * true on entry to that body. Within a statement like `$x = $x->foo()`, the
+     * RHS is evaluated (read) before the LHS commits (assign), so reads precede
+     * mutations at the same line — the chain reads as cause → effect.
      *
-     * Dedup rule: only collapse a repeat read whose type matches the immediately
-     * preceding entry. Mutation, param, and narrow events always survive — the
-     * user is tracing *flow*, not just type-changes.
+     * Dedup rule: collapse a repeat read whose type matches the immediately
+     * preceding entry, EXCEPT when the previous entry is a narrow — narrow is
+     * evidence ("PHPStan now knows X here"), read is actual usage ("your code
+     * accesses it here"). They convey different things and both stay. Mutation,
+     * param, and narrow events always survive — the user is tracing *flow*,
+     * not just type-changes.
      *
      * @param list<array{line: int, type: string, origin: string, reason?: string}> $events
      * @return list<array{line: int, type: string, origin: string, reason?: string}>
@@ -25,9 +29,9 @@ final class ChainBuilder
     {
         $rank = static fn (string $o): int => match ($o) {
             'param' => 0,
-            'assign', 'assign-op', 'assign-ref', 'array-write' => 1,
-            'narrow' => 2,
-            default => 3,
+            'narrow' => 1,
+            'assign', 'assign-op', 'assign-ref', 'array-write' => 3,
+            default => 2,
         };
 
         usort($events, static function (array $a, array $b) use ($rank): int {
@@ -43,6 +47,7 @@ final class ChainBuilder
             if (
                 $event['origin'] === 'read'
                 && $prev !== null
+                && $prev['origin'] !== 'narrow'
                 && $event['type'] === $prev['type']
             ) {
                 continue;
@@ -50,6 +55,7 @@ final class ChainBuilder
             $chain[] = $event;
             $prev = $event;
         }
+
         return $chain;
     }
 }

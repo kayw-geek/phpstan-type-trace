@@ -5,18 +5,21 @@ declare(strict_types=1);
 namespace Kayw\PhpstanTypeTrace\Collector;
 
 use PhpParser\Node;
-use PhpParser\Node\Stmt\If_;
+use PhpParser\Node\Expr\Ternary;
 use PHPStan\Analyser\Scope;
 use PHPStan\Collectors\Collector;
 use PHPStan\Type\VerbosityLevel;
 
 /**
- * Captures conditional guards on `if` statements that cause PHPStan to narrow
- * a value's type. Emitted at the if-body's first line so the chain shows
- * *where* a narrowing was justified, not just *that* the subsequent read had
- * a smaller type than the prior assign.
+ * Same idea as NarrowingCollector but for ternaries. Without this, code like
+ * `is_string($x) ? $x : 'd'` shows a read with a silently narrowed type and
+ * no explanation. Emits a narrow event anchored at the then-branch line so
+ * the read inside the branch is preceded by the predicate that justifies it.
  *
- * @implements Collector<If_, list<array{
+ * Shorthand `?:` is skipped — its then-branch is the condition itself, so
+ * there's no separate read to narrow.
+ *
+ * @implements Collector<Ternary, list<array{
  *     line: int,
  *     functionKey: string,
  *     path: string,
@@ -25,19 +28,20 @@ use PHPStan\Type\VerbosityLevel;
  *     reason: string,
  * }>>
  */
-final class NarrowingCollector implements Collector
+final class TernaryNarrowingCollector implements Collector
 {
     public function getNodeType(): string
     {
-        return If_::class;
+        return Ternary::class;
     }
 
     public function processNode(Node $node, Scope $scope): ?array
     {
-        // The narrow only holds inside the if-body, so anchor the event to the
-        // first body statement. Anchoring it to the `if` line collides with
-        // the read of the same variable in the condition expression itself.
-        $bodyLine = isset($node->stmts[0]) ? $node->stmts[0]->getStartLine() : $node->getStartLine();
+        if ($node->if === null) {
+            return null;
+        }
+
+        $branchLine = $node->if->getStartLine();
         $narrowedScope = $scope->filterByTruthyValue($node->cond);
         $events = [];
         foreach (NarrowGuardScanner::scan($node->cond) as [$expr, $reason]) {
@@ -46,7 +50,7 @@ final class NarrowingCollector implements Collector
                 continue;
             }
             $events[] = [
-                'line' => $bodyLine,
+                'line' => $branchLine,
                 'functionKey' => ScopeKey::of($scope),
                 'path' => $path,
                 'type' => $narrowedScope->getType($expr)->describe(VerbosityLevel::precise()),

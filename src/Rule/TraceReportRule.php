@@ -15,6 +15,7 @@ use Kayw\PhpstanTypeTrace\Collector\ParamInFunctionCollector;
 use Kayw\PhpstanTypeTrace\Collector\ParamInMethodCollector;
 use Kayw\PhpstanTypeTrace\Collector\PropertyFetchCollector;
 use Kayw\PhpstanTypeTrace\Collector\StaticPropertyFetchCollector;
+use Kayw\PhpstanTypeTrace\Collector\TernaryNarrowingCollector;
 use Kayw\PhpstanTypeTrace\Collector\TraceCallCollector;
 use Kayw\PhpstanTypeTrace\Collector\VarReadCollector;
 use Kayw\PhpstanTypeTrace\History\ChainBuilder;
@@ -44,6 +45,7 @@ final class TraceReportRule implements Rule
         AssignRefCollector::class,
         ArrayWriteCollector::class,
         NarrowingCollector::class,
+        TernaryNarrowingCollector::class,
     ];
 
     /** @var list<class-string> Collectors that emit a list of events per node visit. */
@@ -53,6 +55,7 @@ final class TraceReportRule implements Rule
         ParamInClosureCollector::class,
         ParamInArrowFunctionCollector::class,
         NarrowingCollector::class,
+        TernaryNarrowingCollector::class,
     ];
 
     public function __construct(private readonly ChainBuilder $chainBuilder) {}
@@ -207,6 +210,10 @@ final class TraceReportRule implements Rule
 
         $lines = [$header];
         foreach ($chain as $entry) {
+            if ($entry['origin'] === 'narrow' && isset($entry['reason'])) {
+                $lines[] = sprintf('  L%-5d %-10s %s  =>  %s', $entry['line'], 'narrow', $entry['reason'], $entry['type']);
+                continue;
+            }
             $suffix = isset($entry['reason']) ? '  (' . $entry['reason'] . ')' : '';
             $lines[] = sprintf('  L%-5d %-10s %s%s', $entry['line'], $entry['origin'], $entry['type'], $suffix);
         }
