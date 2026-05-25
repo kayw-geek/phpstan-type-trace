@@ -4,7 +4,7 @@
 
 ![Hero](docs/hero.png)
 
-Above: the type evolution of `$modelType` in real larastan code. Five events, one command, zero source edits.
+Above: the type evolution of `$modelType` in real larastan code. Nine events — including three `narrow` rows that show *why* the type tightened — one command, zero source edits.
 
 ## Install
 
@@ -33,11 +33,11 @@ Output:
 $myVar · doStuff [src/Foo.php] (up to L42)
 
   L18  param    int|null
-  L25  assign   int
-  L31  read     positive-int
-  L42  read     positive-int
+  L25  assign   int|null
+  L31  narrow   $myVar !== null  =>  int
+  L42  read     int
 
-4 events · final type: positive-int
+4 events · final type: int
 ```
 
 Variable name is optional — if only one variable has events at the target line, it's auto-picked. Otherwise the candidates are listed.
@@ -91,18 +91,20 @@ function traceType(mixed $value, ?string $reason = null): void
 
 ## What gets captured
 
-| Source                    | Origin label  | Example                  |
-| ------------------------- | ------------- | ------------------------ |
-| Function/method params    | `param`       | `function f(int $x)`     |
-| Closure / arrow-fn params | `param`       | `fn(int $x) => ...`      |
-| Variable assignment       | `assign`      | `$x = 5;`                |
-| Compound assignment       | `assign-op`   | `$x += 1; $x ??= 'def';` |
-| Reference assignment      | `assign-ref`  | `$x = &$other;`          |
-| Property fetch            | `read`        | `$this->foo`             |
-| Static property fetch     | `read`        | `Foo::$bar`              |
-| Variable read             | `read`        | bare `$x` usage          |
+| Source                    | Origin label  | Example                                  |
+| ------------------------- | ------------- | ---------------------------------------- |
+| Function/method params    | `param`       | `function f(int $x)`                     |
+| Closure / arrow-fn params | `param`       | `fn(int $x) => ...`                      |
+| Variable assignment       | `assign`      | `$x = 5;`                                |
+| Compound assignment       | `assign-op`   | `$x += 1; $x ??= 'def';`                 |
+| Reference assignment      | `assign-ref`  | `$x = &$other;`                          |
+| Array write               | `array-write` | `$x[] = 'y'; $x['k'] = $v;`              |
+| Property fetch            | `read`        | `$this->foo`                             |
+| Static property fetch     | `read`        | `Foo::$bar`                              |
+| Variable read             | `read`        | bare `$x` usage                          |
+| If / ternary narrowing    | `narrow`      | `if (is_string($x))`, `$x ?? 'd'`, etc.  |
 
-Narrowing via `if`, `instanceof`, `=== null`, `is_*`, early-returns is free — PHPStan's `Scope` is already narrowed by the time collectors run.
+`narrow` events carry a `reason` showing the predicate that justified the narrowing (`is_string($x)`, `$x instanceof Foo`, `$x !== null`, ...), anchored to the branch where the narrow takes effect. Same-line events are ordered by source position, so an inline ternary reads cause → effect: the cond-read first, then the narrow, then the then-branch read.
 
 ## Limitations
 
@@ -116,12 +118,13 @@ Narrowing via `if`, `instanceof`, `=== null`, `is_*`, early-returns is free — 
 
 Two-phase PHPStan pipeline:
 
-1. **Collectors** (one per event kind) record every relevant AST event with `(file, functionKey, path, line, type, origin)`:
+1. **Collectors** (one per event kind) record every relevant AST event with `(file, functionKey, path, line, pos, type, origin)`:
    - Param entry: `ParamInFunctionCollector`, `ParamInMethodCollector`, `ParamInClosureCollector`, `ParamInArrowFunctionCollector` — hooked on PHPStan's `In*Node` virtual nodes so scope is already inside the function when params are read.
    - Reads: `VarReadCollector`, `PropertyFetchCollector`, `StaticPropertyFetchCollector`.
-   - Writes: `AssignCollector`, `AssignOpCollector` (covers all 13 compound-op subclasses), `AssignRefCollector`.
+   - Writes: `AssignCollector`, `AssignOpCollector` (covers all 13 compound-op subclasses), `AssignRefCollector`, `ArrayWriteCollector`.
+   - Narrowing: `NarrowingCollector` (if-statements), `TernaryNarrowingCollector` (ternaries) — anchored to the branch where the narrow holds, with a reason predicate extracted from the guard.
    - Call sites: `TraceCallCollector`.
-2. **`TraceReportRule`** runs once at the end on the virtual `CollectedDataNode`. For each `traceType()` call it joins the recorded events on `(functionKey, path)` filtered to lines `<=` the call line, sorts by line (mutations win on ties), collapses *only* boring repeated reads of the same type, and emits the delta chain as a PHPStan error.
+2. **`TraceReportRule`** runs once at the end on the virtual `CollectedDataNode`. For each `traceType()` call it joins the recorded events on `(functionKey, path)` filtered to lines `<=` the call line, sorts by `line → source position → rank` (so inline ternaries read cond-read → narrow → then-read, not narrow first), collapses repeated reads of the same type *except* right after a narrow (since the narrow is evidence and the read is the usage — they convey different things), and emits the delta chain as a PHPStan error.
 
 The CLI runs the same pipeline with a dump env var set, captures every chain as a JSON sentinel error, then filters to the `(file, line, variable)` you asked about.
 
