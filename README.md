@@ -1,5 +1,7 @@
 # phpstan-type-trace
 
+🌐 **[Live examples →](https://kayw-geek.github.io/phpstan-type-trace/)** — read 5 real chains in 10 seconds, no install.
+
 When PHPStan tells you:
 
     Parameter #1 $amount of method format() expects float, float|null given.
