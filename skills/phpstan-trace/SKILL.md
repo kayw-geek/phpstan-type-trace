@@ -1,6 +1,6 @@
 ---
 name: phpstan-trace
-description: Use when fixing PHPStan errors in a PHP project, especially errors involving variable types, narrowing, nullability, generics, array shapes, or "X expects Y, Z given" — call the phpstan-trace CLI to retrieve the full type-inference chain (every assignment, parameter binding, narrowing, and read) that shaped the variable up to the failing line, before attempting a fix. Triggers on PHPStan/Larastan/phpstan-strict-rules error messages mentioning types.
+description: Use when a PHPStan/Larastan type error is NON-TRIVIAL to fix by reading the source alone — the variable crosses multiple scopes (closure, callback, helper), is shaped by a third-party extension (larastan Eloquent magic attributes, webmozart/assert, doctrine generics, dynamic-return-type extensions), lives in a method longer than ~30 lines, involves generics / array shapes / template parameters, or a first read of the source already failed to explain the inferred type. Call the phpstan-trace CLI to retrieve the full type-inference chain BEFORE guessing a fix. Skip for trivial errors where the source obviously explains the type at the error line.
 allowed-tools: Bash(vendor/bin/phpstan-trace:*), Bash(./vendor/bin/phpstan-trace:*), Read
 ---
 
@@ -10,18 +10,29 @@ Inspect the full type-inference chain of a variable at a PHP source location.
 
 ## When to use
 
-Invoke this skill **before** attempting to fix any PHPStan error that involves a
-variable's type — for example:
+Invoke this skill **before** attempting to fix a PHPStan type error when **any** of these signals are present:
 
-- `Parameter #1 $x of method Foo::bar() expects Baz, Qux|null given.`
-- `Cannot access property $name on string.`
-- `Argument of an invalid type array<string, mixed> supplied for foreach.`
-- `Strict comparison using === between int and string will always evaluate to false.`
-- Any `array{...}` / generic / template mismatch.
+- The variable is touched in **2+ scopes** (passed into a closure, callback, helper, or array map).
+- A **third-party extension** is plausibly involved: larastan Eloquent magic attributes (`$user->name`, `$model->created_at`), webmozart/assert or beberlei/assert guards, doctrine collections, dynamic-return-type extensions (e.g. `Model::query()`).
+- The enclosing method is **longer than ~30 lines** OR the file exceeds ~100 lines.
+- The error involves **generics, `array{...}` shapes, or template parameters** that don't match what you expect from reading the signature.
+- You **already read the source** and the inferred type at the error line still doesn't make sense.
+- The error is `Cannot access property X on string`, `... expects Foo, Foo|null given`, `... always evaluates to true/false`, or a similar "where did this type come from?" message in any of the above contexts.
 
-The CLI returns every event (parameter binding, assign, compound-op, narrowing,
-read) that shaped the variable from function entry up to the failing line — so
-you can see *where* the wrong type came in, instead of guessing.
+The CLI returns every event (parameter binding, assign, compound-op, narrowing, read) that shaped the variable from function entry up to the failing line — so you can see *where* the wrong type came in, instead of guessing.
+
+## When NOT to use
+
+Skip the CLI and just read the source if **all** of these hold:
+
+- The file is short (< 100 lines) AND the method is short (< 30 lines).
+- The error message names a single line and the variable is assigned/parameter-bound in plain sight nearby.
+- No third-party extension is shaping the type (vanilla PHP, no Eloquent magic, no assert library).
+- The fix is obviously a missing `??` default, a missing null guard, or a typo in a property name.
+
+Also skip for non-type errors: `Call to undefined method`, `Class X not found`, `Access to undefined constant` — these don't need a type-inference chain.
+
+Rule of thumb: if you'd confidently write the fix in under 30 seconds from reading the source, skip the trace. If you'd be guessing, run it.
 
 ## How to use
 
@@ -84,35 +95,60 @@ you can see *where* the wrong type came in, instead of guessing.
      `read` event, `via` names the properties-reflection extension that owns
      the magic / virtual attribute.
 
-## Example
+## Example — when the trace earns its keep
 
-PHPStan error:
+PHPStan error in a Laravel/larastan project:
 
 ```
-src/PriceCalculator.php:25: Parameter #1 $amount of method format() expects float, float|null given.
+app/Http/Controllers/ReportController.php:84:
+Parameter #1 $value of function number_format expects float, mixed given.
 ```
 
-Step 1: Call the trace.
+The relevant code:
+
+```php
+public function export(Request $request): StreamedResponse
+{
+    $users = User::query()->whereActive()->get();
+
+    return response()->streamDownload(function () use ($users, $request) {
+        foreach ($users as $user) {
+            $amount = $this->resolveAmount($user, $request->input('period'));
+            echo number_format($amount, 2); // line 84
+        }
+    }, 'report.csv');
+}
+
+private function resolveAmount(User $user, mixed $period): float
+{
+    return $user->lifetime_value ?? 0.0;
+}
+```
+
+Reading the source: `resolveAmount()` is typed `float`. The error says `mixed`. What?
+
+Three scopes are involved (`export` → closure → `resolveAmount`), and `lifetime_value` is a larastan-typed Eloquent magic attribute. **Source-only reading would either miss the cause or take 10 minutes of grep.** Run the trace:
 
 ```bash
-./vendor/bin/phpstan-trace inspect src/PriceCalculator.php:25 amount --json
+./vendor/bin/phpstan-trace inspect app/Http/Controllers/ReportController.php:84 amount --json
 ```
 
-Step 2: Read the chain.
+Returned chain:
 
 ```json
 {
   "found": true,
   "chain": [
-    {"line": 16, "origin": "param", "type": "float|null"},
-    {"line": 25, "origin": "read", "type": "float|null"}
+    {"line": 83, "origin": "assign", "type": "mixed",
+     "via": ["ModelDynamicMethodReturnTypeExtension"]},
+    {"line": 84, "origin": "read", "type": "mixed"}
   ]
 }
 ```
 
-Step 3: The chain confirms `$amount` is still `float|null` at L25 — no
-narrowing happened. The fix is to add a `??` default or a null guard between
-the param and the call, not to change the signature of `format()`.
+The `via` tells you instantly: larastan's `ModelDynamicMethodReturnTypeExtension` resolved `resolveAmount(...)` to `mixed`, not `float`. Why? Because in this codebase `User` is a generic stub without a registered Eloquent ide-helper, and larastan widens the return when the receiver type is ambiguous. The fix is not in `export()` — it's adding a proper `@property float $lifetime_value` PHPDoc on `User`, or running `php artisan ide-helper:models`.
+
+Without the trace you'd cast in `export()` (wrong fix, masks the root cause) or rewrite `resolveAmount()` to return `mixed` (cascades the problem). The chain points directly at the extension responsible.
 
 ## Notes
 
