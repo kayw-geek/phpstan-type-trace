@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>phpstan-type-trace · Examples</title>
+    <meta name="description" content="Captured type-inference chains from phpstan-trace — 5 real CLI runs you can read in your browser." />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>phpstan-type-trace</strong>
+        <span class="tag">examples · static</span>
+      </div>
+      <nav>
+        <select id="example-picker" aria-label="Load example">
+          <option value="">— pick an example —</option>
+        </select>
+        <a href="https://github.com/kayw-geek/phpstan-type-trace" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="split">
+      <section class="pane editor-pane">
+        <div class="pane-head">source.php · read-only preview</div>
+        <div id="editor"></div>
+      </section>
+      <section class="pane output-pane">
+        <div class="pane-head">$ phpstan-trace inspect source.php:&lt;line&gt; &lt;var&gt;</div>
+        <pre id="output" class="output"></pre>
+      </section>
+    </main>
+
+    <footer class="status">
+      <span id="status">Static gallery · output captured from real CLI runs · live in-browser runner planned for v0.2</span>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
