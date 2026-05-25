@@ -120,6 +120,20 @@ Third-party detection is by source-file location, not namespace — official add
 
 When the inferred type surprises you, `via` tells you which extension to blame (or thank) without grepping the vendor tree.
 
+Real CLI output against a project with `phpstan/phpstan-webmozart-assert` installed:
+
+```
+$ ./vendor/bin/phpstan-trace inspect src/demo.php:12 '$x'
+
+$x · Demo\viaIfStatic [src/demo.php] (up to L12)
+────────────────────────────────────────────────────────────────────────────────
+  L9   param   string|null
+  L12  narrow  Webmozart\Assert\Assert::notNull($x)  =>  string  via AssertTypeSpecifyingExtension
+  L12  read    string
+────────────────────────────────────────────────────────────────────────────────
+3 events · final type: string
+```
+
 **Not attributed yet:** type-specifying calls used as bare statements (e.g. `Assert::notNull($x);` outside any `if` / ternary). PHPStan still narrows the scope but no `narrow` event is emitted, so the chain shows `read` without an explanation. Wrap the call in an `if` if you need the attribution.
 
 ## Limitations
