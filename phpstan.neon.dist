@@ -3,6 +3,14 @@ parameters:
 	paths:
 		- src
 	tmpDir: .phpstan-cache
+	ignoreErrors:
+		# We intentionally use PHPStan's dynamic-return-type registry to attribute
+		# extensions that may have shaped a type. These methods are outside the BC
+		# promise but the surface is small and the failure mode is benign (empty
+		# attribution if the API shifts).
+		-
+			identifier: phpstanApi.method
+			path: src/Collector/ExtensionAttribution.php
 
 includes:
 	- extension.neon

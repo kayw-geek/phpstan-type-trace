@@ -24,8 +24,8 @@ final class ChainBuilder
      * param, and narrow events always survive — the user is tracing *flow*,
      * not just type-changes.
      *
-     * @param list<array{line: int, pos?: int, type: string, origin: string, reason?: string}> $events
-     * @return list<array{line: int, pos?: int, type: string, origin: string, reason?: string}>
+     * @param list<array{line: int, pos?: int, type: string, origin: string, reason?: string, via?: list<string>}> $events
+     * @return list<array{line: int, pos?: int, type: string, origin: string, reason?: string, via?: list<string>}>
      */
     public function build(array $events): array
     {
