@@ -45,9 +45,16 @@ you can see *where* the wrong type came in, instead of guessing.
    ```
 
 3. Read the returned `chain` array. Each entry has `line`, `origin` (`param`,
-   `assign`, `assign-op`, `assign-ref`, `read`), and the **inferred type at
-   that point** (PHPStan's full description — including generics, array shapes,
-   union narrowing, template parameters).
+   `assign`, `assign-op`, `assign-ref`, `array-write`, `narrow`, `read`), and
+   the **inferred type at that point** (PHPStan's full description — including
+   generics, array shapes, union narrowing, template parameters). Two optional
+   fields may also appear:
+   - `reason` — on `narrow` events, the predicate that justified the narrowing
+     (`is_string($x)`, `$x !== null`, `$x instanceof Foo`, ...).
+   - `via` — on `assign` / `assign-op` events whose RHS is a call, a list of
+     third-party PHPStan dynamic-return-type extensions that shaped the
+     inferred type (e.g. `["NewModelQueryDynamicMethodReturnTypeExtension"]`).
+     PHPStan's built-in extensions are filtered out.
 
 4. Use the chain to decide the fix:
    - If the wrong type entered as a **`param`**: fix the caller, or add a type
@@ -59,6 +66,9 @@ you can see *where* the wrong type came in, instead of guessing.
    - For generics/array-shape mismatches: the chain shows the exact concrete
      shape PHPStan inferred — match the consumer signature to it (or fix the
      shape).
+   - If an **`assign` carries `via`** and the inferred type looks wrong or
+     surprising: the cited extension is the source. Read that extension's
+     source (or its docs) before assuming a PHPStan bug or rewriting the call.
 
 ## Example
 

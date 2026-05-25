@@ -106,6 +106,16 @@ function traceType(mixed $value, ?string $reason = null): void
 
 `narrow` events carry a `reason` showing the predicate that justified the narrowing (`is_string($x)`, `$x instanceof Foo`, `$x !== null`, ...), anchored to the branch where the narrow takes effect. Same-line events are ordered by source position, so an inline ternary reads cause → effect: the cond-read first, then the narrow, then the then-branch read.
 
+### Extension attribution (`via`)
+
+When an `assign` / `assign-op` RHS is a method, static-method, or function call whose return type was shaped by a third-party PHPStan dynamic-return-type extension (e.g. larastan's Eloquent builders), the responsible extension is appended:
+
+```
+L9   assign     Builder<User>  via NewModelQueryDynamicMethodReturnTypeExtension
+```
+
+PHPStan's built-in extensions (anything under the `PHPStan\` namespace) are filtered out — they fire on every `array_map` / `Collection::map` and would drown the signal. When the inferred type surprises you, `via` tells you which extension to blame (or thank) without grepping the vendor tree.
+
 ## Limitations
 
 - Loops report the post-fixpoint type, not per-iteration deltas.
