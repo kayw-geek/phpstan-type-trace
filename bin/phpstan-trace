@@ -17,6 +17,8 @@ declare(strict_types=1);
 use function Termwind\render;
 
 const SENTINEL = '__TYPETRACE_DUMP__';
+const LATEST_API_VERSION = 1;
+const SUPPORTED_API_VERSIONS = [1];
 
 bootstrapAutoload();
 main($argv);
@@ -83,15 +85,17 @@ function main(array $argv): void
         exit(1);
     }
 
-    $chains = runDump($phpstanBin, $absFile, $cwd);
     $json = !empty($options['json']);
+    $apiVersion = resolveApiVersion($options['api-version'] ?? null);
+
+    $chains = runDump($phpstanBin, $absFile, $cwd);
 
     if ($rawVar === null) {
         $candidates = candidatesAtLine($chains, $absFile, $line);
         if (count($candidates) === 1) {
             $path = $candidates[0];
         } else {
-            renderAmbiguous($candidates, $absFile, $line, $cwd, $json);
+            renderAmbiguous($candidates, $absFile, $line, $cwd, $json, $apiVersion);
             exit($json ? 0 : 2);
         }
     } else {
@@ -103,7 +107,8 @@ function main(array $argv): void
     if ($match === null) {
         $reason = diagnoseMiss($chains, $absFile, $path);
         if ($json) {
-            echo json_encode([
+            echo encodeJson([
+                'apiVersion' => $apiVersion,
                 'found' => false,
                 'file' => $absFile,
                 'line' => $line,
@@ -111,7 +116,7 @@ function main(array $argv): void
                 'reason' => $reason['code'],
                 'message' => $reason['message'],
                 'availablePaths' => $reason['availablePaths'],
-            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), "\n";
+            ]), "\n";
         } else {
             renderMissPretty(STDERR, $path, $absFile, $line, $reason, $cwd);
         }
@@ -119,17 +124,68 @@ function main(array $argv): void
     }
 
     if ($json) {
-        echo json_encode([
+        echo encodeJson([
+            'apiVersion' => $apiVersion,
             'found' => true,
             'file' => $absFile,
             'line' => $line,
             'path' => $match['path'],
             'functionKey' => $match['functionKey'],
-            'chain' => $match['chain'],
-        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), "\n";
+            'chain' => projectChainForJson($match['chain']),
+        ]), "\n";
     } else {
         renderChainPretty($match, $line, $cwd);
     }
+}
+
+/**
+ * Project a raw chain (internal representation) into the v1 public schema:
+ * only line, origin, type, plus reason/via when present.
+ *
+ * @param list<array<string, mixed>> $chain
+ * @return list<array<string, mixed>>
+ */
+function projectChainForJson(array $chain): array
+{
+    $out = [];
+    foreach ($chain as $event) {
+        $projected = [
+            'line' => $event['line'],
+            'origin' => $event['origin'],
+            'type' => $event['type'],
+        ];
+        if (isset($event['reason'])) {
+            $projected['reason'] = $event['reason'];
+        }
+        if (isset($event['via']) && $event['via'] !== []) {
+            $projected['via'] = $event['via'];
+        }
+        $out[] = $projected;
+    }
+    return $out;
+}
+
+function resolveApiVersion(string|bool|null $raw): int
+{
+    if ($raw === null || $raw === true) {
+        return LATEST_API_VERSION;
+    }
+    if (!preg_match('/^\d+$/', $raw)) {
+        fwrite(STDERR, "--api-version expects a positive integer, got: {$raw}\n");
+        exit(1);
+    }
+    $version = (int) $raw;
+    if (!in_array($version, SUPPORTED_API_VERSIONS, true)) {
+        $supported = implode(', ', SUPPORTED_API_VERSIONS);
+        fwrite(STDERR, "Unsupported --api-version={$version}. Supported: {$supported}.\n");
+        exit(1);
+    }
+    return $version;
+}
+
+function encodeJson(array $payload): string
+{
+    return json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 }
 
 function usage($stream): void
@@ -155,13 +211,17 @@ Arguments:
                   it is auto-selected. Otherwise the candidates are listed.
 
 Options:
-  --json          Emit machine-readable JSON (designed for agent consumption).
-  --phpstan=PATH  Override phpstan binary (default: ./vendor/bin/phpstan).
-  --cwd=DIR       Override working directory used to resolve paths.
-  -h, --help      Show this message.
+  --json              Emit machine-readable JSON (designed for agent / plugin
+                      consumption). Schema documented in docs/json-api.md.
+  --api-version=N     Pin JSON output schema version (default: latest = 1).
+                      Errors on unsupported versions. Pretty mode ignores it.
+  --phpstan=PATH      Override phpstan binary (default: ./vendor/bin/phpstan).
+  --cwd=DIR           Override working directory used to resolve paths.
+  -h, --help          Show this message.
 
 Examples:
   phpstan-trace inspect src/User.php:42 user --json
+  phpstan-trace inspect src/User.php:42 user --json --api-version=1
   phpstan-trace inspect src/User.php:55 user->profile
 
 TXT
@@ -544,10 +604,11 @@ function candidatesAtLine(array $chains, string $absFile, int $line): array
  *
  * @param list<string> $candidates
  */
-function renderAmbiguous(array $candidates, string $absFile, int $line, string $cwd, bool $json): void
+function renderAmbiguous(array $candidates, string $absFile, int $line, string $cwd, bool $json, int $apiVersion): void
 {
     if ($json) {
-        echo json_encode([
+        echo encodeJson([
+            'apiVersion' => $apiVersion,
             'found' => false,
             'file' => $absFile,
             'line' => $line,
@@ -556,7 +617,7 @@ function renderAmbiguous(array $candidates, string $absFile, int $line, string $
                 ? 'No tracked variable has an event at this line.'
                 : 'Multiple variables are tracked at this line; specify <var>.',
             'candidates' => $candidates,
-        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), "\n";
+        ]), "\n";
         return;
     }
 

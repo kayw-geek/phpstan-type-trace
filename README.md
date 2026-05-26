@@ -46,7 +46,7 @@ includes:
 
 Variable name is optional — if only one variable has events at the target line, it's auto-picked. Otherwise the candidates are listed.
 
-Pass `--json` for machine-readable output (handy for tooling).
+Pass `--json` for machine-readable output (handy for IDE plugins, agents, and CI). Schema is versioned and documented in [`docs/json-api.md`](docs/json-api.md); pin with `--api-version=N`.
 
 ### `traceType()` — drop in a marker, get the chain on your next phpstan run
 
