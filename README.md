@@ -111,6 +111,14 @@ When the inferred type surprises you, `via` tells you which extension to blame (
 - Cannot follow values across function boundaries.
 - Ref-aliases (`$alias = &$x; $alias[] = 'y';`) show only the snapshot at the call.
 
+## Use it in PhpStorm
+
+[![JetBrains Plugin](https://img.shields.io/jetbrains/plugin/v/31962-phpstan-type-trace?label=PhpStorm%20plugin)](https://plugins.jetbrains.com/plugin/31962-phpstan-type-trace)
+
+Install the companion plugin to read chains inside the editor — caret on a variable, run **Trace Type at Caret**, and the chain renders in a dedicated tool window with clickable line numbers, copyable types, and `via <Extension>` attribution pills.
+
+The plugin shells out to this CLI, so the package above must be installed in your project's `vendor/`. Marketplace page: <https://plugins.jetbrains.com/plugin/31962-phpstan-type-trace>.
+
 ## Use it with Claude Code
 
 When Claude Code (or any LLM agent) is chasing PHPStan errors, it usually guesses at types. With this extension installed as a [Claude Code plugin](https://docs.claude.com/claude-code), Claude invokes the trace automatically — fixes are grounded in real upstream type evidence, not pattern-matching.
